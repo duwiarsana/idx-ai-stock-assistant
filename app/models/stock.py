@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from sqlalchemy import (
-    String, Boolean, Date, Numeric, BigInteger, DateTime, ForeignKey, Index, func,
+    String, Boolean, Date, Numeric, BigInteger, DateTime, ForeignKey, Index, func, JSON,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin
@@ -87,7 +87,7 @@ class StockScore(Base):
     volume_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
     sentiment_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
     composite_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
-    score_details: Mapped[Optional[dict]] = mapped_column(default=None)
+    score_details: Mapped[Optional[dict]] = mapped_column(JSON, default=None, nullable=True)
     calculated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
