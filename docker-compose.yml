@@ -49,9 +49,9 @@ services:
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_DB: idx_ai
-      POSTGRES_USER: idx_ai_user
-      POSTGRES_PASSWORD: change_me_in_production
+      POSTGRES_DB: ${POSTGRES_DB:-idx_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-idx_ai_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_production}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
