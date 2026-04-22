@@ -20,7 +20,17 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = config.get_main_option("sqlalchemy.url")
+    import os
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        url = config.get_main_option("sqlalchemy.url")
+    
+    # Alembic needs sync driver (psycopg2), so replace asyncpg if present
+    if url and "asyncpg" in url:
+        url = url.replace("asyncpg", "psycopg2")
+    elif url and "postgresql://" in url:
+        url = url.replace("postgresql://", "postgresql+psycopg2://")
+
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -33,11 +43,25 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    import os
+    url = os.getenv("DATABASE_URL")
+    
+    # Alembic needs sync driver (psycopg2)
+    if url and "asyncpg" in url:
+        url = url.replace("asyncpg", "psycopg2")
+    elif url and "postgresql://" in url:
+        url = url.replace("postgresql://", "postgresql+psycopg2://")
+
+    if url:
+        from sqlalchemy import create_engine
+        connectable = create_engine(url, poolclass=pool.NullPool)
+    else:
+        connectable = engine_from_config(
+            config.get_section(config.config_ini_section, {}),
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+        )
+
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
