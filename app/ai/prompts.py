@@ -100,8 +100,8 @@ Provide your analysis in this EXACT format:
 🔧 **Indikator Teknikal:**
 [Explain which indicators are confirming and which are diverging]
 
-📉 **Analisis Sentimen Berita:**
-[Analyze the news sentiment and its impact]
+📉 **Analisis Sentimen & Berita Terkini:**
+[Analisis sentimen dari berita-berita terbaru di atas. Identifikasi apakah ada informasi "viral" atau yang paling banyak dibicarakan yang dapat mempengaruhi pergerakan harga. Berikan ringkasan apa yang sedang menjadi sorotan pasar saat ini.]
 
 💡 **Level Penting:**
 [Discuss support, resistance, entry zone, stop loss, and take profit from scoring]
@@ -145,13 +145,13 @@ User Message: "{user_message}"
 Respond ONLY with a JSON object in this format:
 {{
     "ticker": "BBCA", // The stock ticker if found, otherwise null
-    "intent": "analyze", // Either "analyze" (for full analysis), "price" (for quick quote), or "other" (for general chat)
-    "reasoning": "User is asking about the future prospects of BBCA" // Brief explanation
+    "intent": "analyze", // Either "analyze" (full analysis), "price" (quick quote), "news" (latest news), or "other" (general)
+    "reasoning": "User is asking for general market news" // Brief explanation
 }}
 
 Guidelines:
 - Tickers are usually 4 uppercase letters (e.g., BBRI, TLKM, GOTO).
 - If the user just mentions a stock, assume "price".
-- If the user asks for analysis, trend, or deep insight, use "analyze".
+- If the user asks for analysis, trend, news, or deep insight, use "analyze".
 - If the user is just saying hi or something else, use "other".
 """

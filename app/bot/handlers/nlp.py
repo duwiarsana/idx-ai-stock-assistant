@@ -54,13 +54,28 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             ticker = ticker.upper()
             context.args = [ticker]
             
-            if intent == "analyze":
+            if intent == "analyze" or intent == "news":
                 # For NLP, we pass the original text as a question
                 logger.info(f"NLP Routing to analyze: {ticker} (reason: {data.get('reasoning')})")
                 await analyze_handler(update, context)
             else:
                 logger.info(f"NLP Routing to stock lookup: {ticker}")
                 await stock_handler(update, context)
+        elif intent == "news":
+            logger.info("NLP: General news request")
+            from app.data.news_fetcher import news_fetcher
+            news_text = await news_fetcher.get_news_summary_text(None, limit=7)
+            
+            # Use LLM to summarize general news nicely
+            summary_response = await llm_client.generate(
+                system_prompt="You are IDX AI. Summarize the latest Indonesian stock market news provided. Focus on what is most discussed/viral.",
+                user_prompt=f"Berikut berita terbaru:\n{news_text}",
+                temperature=0.7
+            )
+            try:
+                await update.message.reply_text(summary_response, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(summary_response)
         else:
             # General chat or no ticker found
             logger.info("NLP: No ticker found, responding as general assistant")

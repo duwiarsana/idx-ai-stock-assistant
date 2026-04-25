@@ -57,13 +57,20 @@ class NewsFetcher:
             logger.error(f"Error fetching news for {ticker}: {e}")
             return []
 
-    async def get_news_summary_text(self, ticker: str, limit: int = 5) -> str:
+    async def get_news_summary_text(self, ticker: Optional[str], limit: int = 5) -> str:
         """Get a formatted string of news for the AI prompt."""
-        news = await self.fetch_news(ticker, limit)
-        if not news:
-            return "No recent news found for this stock."
+        if ticker:
+            news = await self.fetch_news(ticker, limit)
+            header = f"Berita terbaru untuk {ticker}:\n"
+        else:
+            # Fetch general Indonesian stock market news
+            news = await self.fetch_news("pasar saham indonesia", limit)
+            header = "Berita terkini pasar saham Indonesia:\n"
             
-        summary = ""
+        if not news:
+            return "Tidak ada berita terbaru ditemukan."
+            
+        summary = header
         for i, item in enumerate(news, 1):
             summary += f"{i}. {item['title']} (Sumber: {item['source']}, Tanggal: {item['date']})\n"
         
