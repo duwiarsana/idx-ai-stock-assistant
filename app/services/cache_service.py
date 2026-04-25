@@ -18,9 +18,42 @@ class CacheService:
     QUOTE_PREFIX = "quote:"
     ANALYSIS_PREFIX = "analysis:"
 
+    HISTORY_PREFIX = "chat_history:"
+    MAX_HISTORY = 10  # Last 10 messages
+
     def __init__(self):
         self.redis = redis_client
         self.default_ttl = settings.stock_cache_ttl
+
+    async def get_history(self, user_id: int) -> list[dict]:
+        """Get recent chat history for a user."""
+        try:
+            raw = await self.redis.get(f"{self.HISTORY_PREFIX}{user_id}")
+            if raw:
+                return json.loads(raw)
+        except Exception as e:
+            logger.warning(f"Error getting history for {user_id}: {e}")
+        return []
+
+    async def add_to_history(self, user_id: int, role: str, content: str):
+        """Add a message to the user's chat history."""
+        try:
+            history = await self.get_history(user_id)
+            history.append({"role": role, "content": content})
+            
+            # Keep only the last N messages
+            if len(history) > self.MAX_HISTORY:
+                history = history[-self.MAX_HISTORY:]
+                
+            serialized = json.dumps(history)
+            # Store for 1 hour of inactivity
+            await self.redis.setex(f"{self.HISTORY_PREFIX}{user_id}", 3600, serialized)
+        except Exception as e:
+            logger.warning(f"Error adding to history for {user_id}: {e}")
+
+    async def clear_history(self, user_id: int):
+        """Clear chat history for a user."""
+        await self.redis.delete(f"{self.HISTORY_PREFIX}{user_id}")
 
     async def get_stock_data(self, ticker: str) -> Optional[dict]:
         """Get cached stock data."""

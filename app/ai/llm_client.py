@@ -58,44 +58,47 @@ class LLMClient:
         self,
         system_prompt: str,
         user_prompt: str,
+        history: Optional[list[dict]] = None,
         temperature: float = 0.7,
         max_tokens: int = 2000,
     ) -> str:
         """
-        Generate a response from the LLM.
+        Generate a response from the LLM with optional conversation history.
         """
+        # Prepare messages
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        if history:
+            # Map history roles to LLM roles if needed (usually already 'user'/'assistant')
+            messages.extend(history)
+            
+        messages.append({"role": "user", "content": user_prompt})
+
         try:
             if self.provider == "gemini":
-                # Using google-genai aio client
+                # For Gemini, we combine messages into one prompt or use chat session
+                # Simplest is combining for now
+                full_prompt = system_prompt + "\n\n"
+                if history:
+                    for msg in history:
+                        role = "User" if msg["role"] == "user" else "Assistant"
+                        full_prompt += f"{role}: {msg['content']}\n"
+                full_prompt += f"User: {user_prompt}"
+                
                 response = await self.client.aio.models.generate_content(
                     model=self.model,
-                    contents=f"{system_prompt}\n\n{user_prompt}",
+                    contents=full_prompt,
                     config={
                         "temperature": temperature,
                         "max_output_tokens": max_tokens,
                     }
                 )
                 return response.text
-            elif self.provider == "groq":
-                # Using Groq's OpenAI-compatible client
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                return response.choices[0].message.content
             else:
-                # OpenAI-compatible clients (DeepSeek, Ollama)
+                # OpenAI-compatible clients (Groq, DeepSeek, Ollama)
                 response = await self.client.chat.completions.create(
                     model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
