@@ -42,12 +42,18 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             data = json.loads(json_str)
             ticker = data.get("ticker")
             intent = data.get("intent", "other")
+            query = data.get("query", text)
+            region = data.get("region", "ID")
+            if region == "AUTO":
+                region = "ID"
         except Exception as e:
             logger.error(f"Failed to parse NLP response: {response}. Error: {e}")
             # Fallback: look for 4-letter uppercase words
             matches = re.findall(r'\b[A-Z]{4}\b', text.upper())
             ticker = matches[0] if matches else None
             intent = "analyze" if ticker else "other"
+            query = text
+            region = "ID"
 
         # 3. Route based on intent
         if ticker:
@@ -62,14 +68,18 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 logger.info(f"NLP Routing to stock lookup: {ticker}")
                 await stock_handler(update, context)
         elif intent == "news":
-            logger.info("NLP: General news request")
+            logger.info(f"NLP: General news request for '{query}' (region: {region})")
             from app.data.news_fetcher import news_fetcher
-            news_text = await news_fetcher.get_news_summary_text(None, limit=7)
+            news_text = await news_fetcher.get_news_summary_text(query, limit=7, region=region)
             
             # Use LLM to summarize general news nicely
             summary_response = await llm_client.generate(
-                system_prompt="You are IDX AI. Summarize the latest Indonesian stock market news provided. Focus on what is most discussed/viral.",
-                user_prompt=f"Berikut berita terbaru:\n{news_text}",
+                system_prompt=(
+                    "You are IDX AI. Summarize the latest news provided. "
+                    "If region is US, provide response in English or Indonesian as requested. "
+                    "Focus on what is most discussed/viral."
+                ),
+                user_prompt=f"Berikut berita terbaru untuk '{query}':\n{news_text}",
                 temperature=0.7
             )
             try:

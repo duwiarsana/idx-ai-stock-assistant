@@ -145,13 +145,14 @@ User Message: "{user_message}"
 Respond ONLY with a JSON object in this format:
 {{
     "ticker": "BBCA", // The stock ticker if found, otherwise null
-    "intent": "analyze", // Either "analyze" (full analysis), "price" (quick quote), "news" (latest news), or "other" (general)
-    "reasoning": "User is asking for general market news" // Brief explanation
+    "intent": "analyze", // "analyze", "price", "news" (specific or general), or "other"
+    "query": "teknologi AI terbaru", // Search query for news/info if intent is news/analyze
+    "region": "ID", // "ID" for local, "US" for international, "AUTO" if not specified
+    "reasoning": "User is asking for technology news" 
 }}
 
 Guidelines:
-- Tickers are usually 4 uppercase letters (e.g., BBRI, TLKM, GOTO).
-- If the user just mentions a stock, assume "price".
-- If the user asks for analysis, trend, news, or deep insight, use "analyze".
-- If the user is just saying hi or something else, use "other".
+- Tickers: 4 uppercase letters.
+- If user asks for general news (economy, tech, world), use intent "news" and extract a descriptive query.
+- If user mentions "global", "luar negeri", "international", "US", use region "US". Otherwise use "ID".
 """

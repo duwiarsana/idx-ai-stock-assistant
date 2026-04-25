@@ -73,7 +73,7 @@ class AIService:
         # Prepare technicals and news
         technicals = data.get("technicals", {})
         price_table = self.stocks.format_price_table(data.get("history", []))
-        news_summary = await news_fetcher.get_news_summary_text(ticker, limit=10)
+        news_summary = await news_fetcher.get_news_summary_text(f"{ticker} saham indonesia", limit=10)
 
         # ── Run deterministic scoring engine ──────────────────────────
         history = data.get("history", [])

@@ -13,19 +13,18 @@ class NewsFetcher:
     def __init__(self):
         self.base_url = "https://news.google.com/rss/search"
 
-    async def fetch_news(self, ticker: str, limit: int = 5) -> List[Dict]:
+    async def fetch_news(self, query: str, limit: int = 5, region: str = "ID") -> List[Dict]:
         """
-        Fetch recent news for a stock from Indonesian sources.
+        Fetch recent news based on a query.
+        region: "ID" for Indonesian, "US" for international/English.
         """
-        logger.info(f"Fetching news for {ticker}...")
+        logger.info(f"Fetching news for query: {query} (region: {region})...")
         
-        # Search query for Indonesian news
-        query = f"{ticker} saham indonesia"
         params = {
             "q": query,
-            "hl": "id",
-            "gl": "ID",
-            "ceid": "ID:id"
+            "hl": "id" if region == "ID" else "en-US",
+            "gl": region,
+            "ceid": "ID:id" if region == "ID" else "US:en"
         }
 
         try:
@@ -41,7 +40,8 @@ class NewsFetcher:
                     title = item.find("title").text if item.find("title") is not None else ""
                     link = item.find("link").text if item.find("link") is not None else ""
                     pub_date = item.find("pubDate").text if item.find("pubDate") is not None else ""
-                    source = item.find("source").text if item.find("source") is not None else "Google News"
+                    source_elem = item.find("source")
+                    source = source_elem.text if source_elem is not None else "News Source"
                     
                     items.append({
                         "title": title,
@@ -50,27 +50,20 @@ class NewsFetcher:
                         "source": source
                     })
                 
-                logger.info(f"Successfully fetched {len(items)} news items for {ticker}")
                 return items
 
         except Exception as e:
             logger.error(f"Error fetching news for {ticker}: {e}")
             return []
 
-    async def get_news_summary_text(self, ticker: Optional[str], limit: int = 5) -> str:
+    async def get_news_summary_text(self, query: str, limit: int = 5, region: str = "ID") -> str:
         """Get a formatted string of news for the AI prompt."""
-        if ticker:
-            news = await self.fetch_news(ticker, limit)
-            header = f"Berita terbaru untuk {ticker}:\n"
-        else:
-            # Fetch general Indonesian stock market news
-            news = await self.fetch_news("pasar saham indonesia", limit)
-            header = "Berita terkini pasar saham Indonesia:\n"
-            
+        news = await self.fetch_news(query, limit, region)
+        
         if not news:
-            return "Tidak ada berita terbaru ditemukan."
+            return f"Tidak ada berita terbaru ditemukan untuk pencarian: {query}."
             
-        summary = header
+        summary = f"Berita terbaru ({region}) untuk '{query}':\n"
         for i, item in enumerate(news, 1):
             summary += f"{i}. {item['title']} (Sumber: {item['source']}, Tanggal: {item['date']})\n"
         
