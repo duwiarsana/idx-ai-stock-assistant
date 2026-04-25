@@ -28,10 +28,13 @@ AI-powered Indonesian stock market analysis assistant. Provides data-driven insi
 
 - 📊 **Stock Lookup** — Real-time IDX stock prices via `/stock BBCA`
 - 🔍 **AI Analysis** — Full technical analysis via `/analyze BBCA`
-- 📈 **Technical Indicators** — RSI, MACD, SMA calculated automatically
+- 🎯 **Advanced Scoring Engine** — Deterministic weighted scoring (MA, RSI, MACD, Volume, Breakout)
+- 📰 **Smart News Search** — Local & International news (Tech, Economy, etc.) with trending topic detection
+- 🧠 **Conversation Memory** — Remembers context across messages for natural chat (powered by Redis)
+- 📈 **Technical Indicators** — RSI, MACD, SMA, ATR, Bollinger Bands, Support/Resistance
 - 💬 **Natural Language** — Ask questions in Indonesian or English
-- ⚡ **Redis Caching** — Fast responses with 5-minute cache
-- 🔒 **Rate Limiting** — Protection against abuse
+- ⚡ **Redis Caching** — Fast responses with multi-layer caching
+- 🔒 **Robust Deployment** — Bypasses yfinance 429 errors with modern history fetching
 
 ## 🚀 Quick Start
 
@@ -120,16 +123,21 @@ idx-ai-stock-assistant/
 | POST | `/api/v1/analysis/{ticker}` | AI analysis with question |
 | GET | `/api/v1/analysis/{ticker}/quick` | Quick lookup |
 
-## 🤖 Telegram Commands
+## 🤖 Telegram Commands & NLP
+
+The bot understands both direct commands and natural language:
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Welcome & instructions |
-| `/help` | Full help guide |
 | `/stock BBCA` | Quick price check |
-| `/s BBCA` | Shortcut for /stock |
 | `/analyze BBCA` | Full AI analysis |
-| `/a BBCA` | Shortcut for /analyze |
+| `/news` | Latest market news |
+
+**Natural Language Examples:**
+- *"Gimana kondisi BBRI sekarang?"*
+- *"Apa berita terbaru tentang teknologi di luar negeri?"*
+- *"Bandingkan dengan TLKM"* (Uses memory of previous stock)
+- *"Kasih info ekonomi global yang lagi viral"*
 
 ## 📊 Supported Stocks
 
