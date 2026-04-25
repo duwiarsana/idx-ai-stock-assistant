@@ -1,4 +1,4 @@
-"""/analyze command handler — full AI stock analysis."""
+"""/analyze command handler — full AI stock analysis with score card."""
 
 import logging
 import os
@@ -16,7 +16,7 @@ MAX_TELEGRAM_MSG_LENGTH = 4096
 async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle /analyze <TICKER> [question] command.
-    Provides full AI-powered stock analysis.
+    Provides full AI-powered stock analysis with deterministic score card.
     """
     if not context.args:
         await update.message.reply_text(
@@ -43,7 +43,7 @@ async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Notify user that analysis is in progress
     status_msg = await update.message.reply_text(
         f"🔍 Menganalisis **{ticker}**...\n"
-        f"_Mengambil data pasar dan menjalankan analisis AI..._",
+        f"_Mengambil data pasar, menghitung skor, dan menjalankan analisis AI..._",
         parse_mode="Markdown",
     )
 
@@ -51,6 +51,7 @@ async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         result = await ai_service.analyze_stock(ticker, user_question=user_question)
         analysis_text = result.get("analysis", "Tidak ada analisis tersedia.")
         history = result.get("history", [])
+        score_card = result.get("score_card", "")
 
         # 1. Generate Chart
         chart_path = await chart_service.generate_candlestick_chart(ticker, history)
@@ -75,7 +76,14 @@ async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             except:
                 pass
 
-        # 3. Send the analysis (handle Telegram's 4096 char limit)
+        # 3. Send Score Card (deterministic results)
+        if score_card:
+            await update.message.reply_text(
+                f"```\n{score_card}\n```",
+                parse_mode="Markdown",
+            )
+
+        # 4. Send the analysis (handle Telegram's 4096 char limit)
         if len(analysis_text) <= MAX_TELEGRAM_MSG_LENGTH:
             await update.message.reply_text(
                 analysis_text,
@@ -97,7 +105,7 @@ async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
         await update.message.reply_text(
-            f"❌ Terjadi kesalahan saat menganalisis **{ticker}** (v1.0.1-fixed).\n"
+            f"❌ Terjadi kesalahan saat menganalisis **{ticker}**.\n"
             f"Silakan coba lagi dalam beberapa saat.\n\n"
             f"_Error: {str(e)[:100]}_",
             parse_mode="Markdown",

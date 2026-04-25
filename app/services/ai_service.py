@@ -1,4 +1,4 @@
-"""AI analysis service — orchestrates stock data + LLM for analysis."""
+"""AI analysis service — orchestrates scoring engine + LLM for analysis."""
 
 import logging
 from datetime import datetime
@@ -13,13 +13,14 @@ from app.ai.prompts import (
 )
 from app.services.stock_service import stock_service
 from app.services.cache_service import cache_service
+from app.services.analysis_engine import analyze as run_analysis, format_score_card, AnalysisResult
 from app.data.news_fetcher import news_fetcher
 
 logger = logging.getLogger(__name__)
 
 
 class AIService:
-    """Orchestrates stock data retrieval and AI-powered analysis."""
+    """Orchestrates stock data retrieval, deterministic scoring, and AI analysis."""
 
     def __init__(self):
         self.llm = llm_client
@@ -34,14 +35,16 @@ class AIService:
         """
         Full AI analysis of a stock.
 
+        Flow:
         1. Fetch stock data (with cache)
         2. Calculate technicals
-        3. Build prompt with real data
-        4. Send to LLM
-        5. Return structured response
+        3. Run deterministic scoring engine
+        4. Build prompt with real data + score card
+        5. Send to LLM (LLM explains the scores, doesn't invent them)
+        6. Return structured response
 
         Returns:
-            dict with analysis text, data summary, disclaimer
+            dict with analysis text, score_data, data summary, disclaimer
         """
         ticker = ticker.upper().strip()
 
@@ -60,6 +63,8 @@ class AIService:
                 "company_name": "Unknown",
                 "analysis": f"❌ Tidak dapat menemukan data untuk ticker **{ticker}**.\n\n"
                             f"Pastikan kode saham benar (contoh: BBCA, TLKM, ASII).",
+                "score_data": None,
+                "score_card": "",
                 "data_summary": {},
                 "disclaimer": DISCLAIMER_ID,
                 "generated_at": datetime.now().isoformat(),
@@ -70,7 +75,72 @@ class AIService:
         price_table = self.stocks.format_price_table(data.get("history", []))
         news_summary = await news_fetcher.get_news_summary_text(ticker)
 
-        # Build the analysis prompt with real data
+        # ── Run deterministic scoring engine ──────────────────────────
+        history = data.get("history", [])
+        score_result: Optional[AnalysisResult] = run_analysis(ticker, history)
+
+        score_card_text = ""
+        score_section = "Scoring engine: Insufficient data for scoring."
+        score_data_dict = None
+
+        if score_result:
+            # ── ML Prediction ─────────────────────────────────────────
+            try:
+                from app.services.ml_predictor import ml_predictor
+
+                ml_features = ml_predictor.extract_features({
+                    **technicals,
+                    "current_price": float(data.get("current_price", 0)),
+                })
+                ml_pred = ml_predictor.predict(ticker, ml_features)
+
+                if ml_pred:
+                    score_result.ml_probability = ml_pred.probability
+                    score_result.ml_direction = ml_pred.direction
+                    ml_score = ml_pred.probability * 100
+                    score_result.combined_score = round(
+                        score_result.final_score * 0.6 + ml_score * 0.4, 1
+                    )
+            except Exception as ml_err:
+                logger.debug(f"ML prediction skipped for {ticker}: {ml_err}")
+
+            score_card_text = format_score_card(score_result)
+            score_data_dict = score_result.to_dict()
+
+            # Build a structured score section for the LLM prompt
+            ind_lines = []
+            for name, detail in score_result.indicators.items():
+                ind_lines.append(
+                    f"  {name}: normalized={detail['normalized']:.2f}, "
+                    f"weight={detail['weight']}, signal={detail['signal']}"
+                )
+            indicators_text = "\n".join(ind_lines)
+
+            score_section = (
+                f"Final Score: {score_result.final_score}/100\n"
+                f"Confidence: {score_result.confidence}\n"
+                f"Signal: {score_result.signal} ({score_result.signal_strength})\n"
+                f"Trend: {score_result.trend_status}\n"
+                f"Risk/Reward Ratio: 1:{score_result.risk_reward_ratio}\n"
+                f"Volatility: {score_result.volatility} (ATR: {score_result.atr:,.0f})\n"
+                f"Support: Rp {score_result.support:,.0f}\n"
+                f"Resistance: Rp {score_result.resistance:,.0f}\n"
+                f"Entry Zone: Rp {score_result.entry_zone['low']:,.0f} – {score_result.entry_zone['high']:,.0f}\n"
+                f"Stop Loss: Rp {score_result.stop_loss:,.0f}\n"
+                f"Take Profit: Rp {score_result.take_profit:,.0f}\n"
+                f"Confirming Indicators: {score_result.confirming_indicators}/5\n\n"
+                f"Indicator Breakdown:\n{indicators_text}"
+            )
+
+            # Add ML section if available
+            if score_result.ml_probability is not None:
+                score_section += (
+                    f"\n\nML Prediction: {score_result.ml_direction} "
+                    f"({score_result.ml_probability * 100:.0f}% probability)\n"
+                    f"Combined Score (Tech 60% + ML 40%): {score_result.combined_score}"
+                )
+
+        # Build the analysis prompt with real data + scoring data
         prompt = ANALYSIS_PROMPT.format(
             ticker=ticker,
             company_name=data.get("name", "Unknown"),
@@ -92,8 +162,15 @@ class AIService:
             trend_5d=technicals.get("trend_5d", "N/A"),
             change_5d_pct=float(technicals.get("change_5d_pct", 0) or 0),
             price_position_pct=float(technicals.get("price_position_pct", 50) or 50),
+            atr=technicals.get("atr_14", "N/A"),
+            atr_pct=technicals.get("atr_pct", "N/A"),
+            bb_upper=technicals.get("bb_upper", "N/A"),
+            bb_lower=technicals.get("bb_lower", "N/A"),
+            support=technicals.get("support", "N/A"),
+            resistance=technicals.get("resistance", "N/A"),
             price_table=price_table,
             news_summary=news_summary,
+            score_section=score_section,
             user_question=(
                 f"\nUser's specific question: {user_question}" if user_question
                 else "\nProvide a comprehensive general analysis."
@@ -116,6 +193,8 @@ class AIService:
             "ticker": ticker,
             "company_name": data.get("name", "Unknown"),
             "analysis": analysis_text,
+            "score_data": score_data_dict,
+            "score_card": score_card_text,
             "history": data.get("history", []),
             "data_summary": {
                 "price": float(data.get("current_price", 0)),
@@ -124,6 +203,9 @@ class AIService:
                 "rsi": technicals.get("rsi_14"),
                 "macd_crossover": technicals.get("macd_crossover"),
                 "trend_5d": technicals.get("trend_5d"),
+                "final_score": score_result.final_score if score_result else None,
+                "signal": score_result.signal if score_result else None,
+                "confidence": score_result.confidence if score_result else None,
             },
             "disclaimer": DISCLAIMER_ID,
             "generated_at": datetime.now().isoformat(),

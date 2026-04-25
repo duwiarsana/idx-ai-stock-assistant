@@ -10,6 +10,7 @@ CRITICAL RULES:
 5. You acknowledge uncertainty and risks honestly
 6. You respond in the same language the user uses (Indonesian or English)
 7. You ALWAYS include a disclaimer at the end
+8. You EXPLAIN the pre-computed scoring data — do NOT override or contradict it
 
 Your analysis should be:
 - Data-driven and factual
@@ -17,8 +18,9 @@ Your analysis should be:
 - Structured with sections
 - Honest about limitations
 
-TONE EXAMPLE:
-"Berdasarkan volume perdagangan dan tren harga terkini, saham ini menunjukkan peningkatan minat. Namun, volatilitas juga meningkat, yang menandakan risiko yang lebih tinggi."
+IMPORTANT: A quantitative scoring engine has already computed a deterministic score.
+Your job is to EXPLAIN WHY the score is what it is, using the raw data provided.
+Do NOT invent your own score or contradict the scoring engine.
 """
 
 ANALYSIS_PROMPT = """Analyze this Indonesian stock based on the following REAL market data.
@@ -52,6 +54,17 @@ MACD Crossover: {macd_crossover}
 Volume Ratio (vs 20d avg): {volume_ratio}x
 5-Day Trend: {trend_5d} ({change_5d_pct:+.2f}%)
 Price Position (52w range): {price_position_pct:.0f}%
+ATR (14): {atr} ({atr_pct}% of price)
+Bollinger Upper: {bb_upper}
+Bollinger Lower: {bb_lower}
+Support: {support}
+Resistance: {resistance}
+
+══════════════════════════════════════
+🎯 SCORING ENGINE RESULTS
+══════════════════════════════════════
+
+{score_section}
 
 ══════════════════════════════════════
 📋 RECENT PRICE DATA (Last 10 days)
@@ -75,23 +88,29 @@ Provide your analysis in this EXACT format:
 
 💰 **Harga Saat Ini:** Rp [price] ([change]%)
 
-📉 **Analisis Sentimen Berita:**
-[Analyze the sentiment of the provided news headlines. Is it positive, negative, or neutral? How does it affect the stock?]
+🎯 **Skor & Sinyal:**
+[Explain the scoring engine results: what the final score means, why the signal is what it is, and what confidence level indicates. Reference the indicator breakdown.]
 
 📈 **Tren & Momentum:**
-[Your analysis of price trend and momentum]
+[Your analysis of price trend and momentum, referencing the trend status from scoring]
 
-📊 **Volume:**
-[Your analysis of trading volume]
+📊 **Volume & Volatilitas:**
+[Analysis of volume ratio and ATR-based volatility classification]
 
 🔧 **Indikator Teknikal:**
-[Your interpretation of RSI, MACD, and moving averages]
+[Explain which indicators are confirming and which are diverging]
+
+📉 **Analisis Sentimen Berita:**
+[Analyze the news sentiment and its impact]
+
+💡 **Level Penting:**
+[Discuss support, resistance, entry zone, stop loss, and take profit from scoring]
 
 ⚠️ **Faktor Risiko:**
-[Key risk factors including any news-related risks]
+[Key risk factors including volatility and signal strength]
 
 📝 **Ringkasan:**
-[Brief 2-3 sentence summary]
+[Brief 2-3 sentence summary that aligns with the scoring engine output]
 
 ⚠️ *Disclaimer: Ini bukan saran investasi. Lakukan riset mandiri sebelum mengambil keputusan investasi.*
 """

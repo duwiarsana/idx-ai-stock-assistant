@@ -62,12 +62,21 @@ class StockService:
         return quote
 
     def _calculate_technicals(self, history: list[dict]) -> dict:
-        """Calculate basic technical indicators from price history."""
+        """Calculate technical indicators from price history.
+
+        Includes: RSI, SMA, MACD, Volume, ATR, Bollinger Bands, HH/HL pattern.
+        """
         if len(history) < 14:
             return {"error": "Not enough data for technical analysis"}
 
         df = pd.DataFrame(history)
+        for col in ("open", "high", "low", "close", "volume"):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
         close = df["close"]
+        high = df["high"]
+        low = df["low"]
 
         result = {}
 
@@ -116,6 +125,44 @@ class StockService:
                     float(current_vol / avg_vol_20), 2
                 ) if avg_vol_20 > 0 else 0
 
+            # ── ATR (14-period) ──────────────────────────
+            if len(close) >= 15:
+                prev_close = close.shift(1)
+                tr = pd.concat([
+                    high - low,
+                    (high - prev_close).abs(),
+                    (low - prev_close).abs(),
+                ], axis=1).max(axis=1)
+                atr_series = tr.rolling(window=14).mean()
+                atr_val = float(atr_series.iloc[-1])
+                result["atr_14"] = round(atr_val, 2)
+                current_price = float(close.iloc[-1])
+                result["atr_pct"] = round(atr_val / current_price * 100, 2) if current_price > 0 else 0
+
+            # ── Bollinger Bands (20, 2) ──────────────────
+            if len(close) >= 20:
+                bb_mid = close.rolling(20).mean()
+                bb_std = close.rolling(20).std()
+                bb_upper = bb_mid + 2 * bb_std
+                bb_lower = bb_mid - 2 * bb_std
+                result["bb_upper"] = round(float(bb_upper.iloc[-1]), 2)
+                result["bb_mid"] = round(float(bb_mid.iloc[-1]), 2)
+                result["bb_lower"] = round(float(bb_lower.iloc[-1]), 2)
+                bb_width = float(bb_upper.iloc[-1]) - float(bb_lower.iloc[-1])
+                result["bb_width_pct"] = round(
+                    bb_width / float(bb_mid.iloc[-1]) * 100, 2
+                ) if float(bb_mid.iloc[-1]) > 0 else 0
+
+            # ── Higher Highs / Higher Lows ───────────────
+            if len(high) >= 10:
+                window = 5
+                recent_h = high.tail(window)
+                prev_h = high.iloc[-(window * 2):-window]
+                recent_l = low.tail(window)
+                prev_l = low.iloc[-(window * 2):-window]
+                result["higher_highs"] = bool(float(recent_h.max()) > float(prev_h.max()))
+                result["higher_lows"] = bool(float(recent_l.min()) > float(prev_l.min()))
+
             # ── Price Position ───────────────────────────
             current_price = float(close.iloc[-1])
             high_52w = float(close.tail(252).max()) if len(close) >= 252 else float(close.max())
@@ -135,6 +182,11 @@ class StockService:
                 result["change_5d_pct"] = round(
                     float(short_trend / close.iloc[-5] * 100), 2
                 ) if close.iloc[-5] != 0 else 0
+
+            # ── Support / Resistance ─────────────────────
+            sr_window = min(20, len(low))
+            result["support"] = round(float(low.tail(sr_window).min()), 2)
+            result["resistance"] = round(float(high.tail(sr_window).max()), 2)
 
         except Exception as e:
             logger.warning(f"Technical calculation error: {e}")
