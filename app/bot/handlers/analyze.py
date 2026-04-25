@@ -84,19 +84,17 @@ async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
 
         # 4. Send the analysis (handle Telegram's 4096 char limit)
-        if len(analysis_text) <= MAX_TELEGRAM_MSG_LENGTH:
-            await update.message.reply_text(
-                analysis_text,
-                parse_mode="Markdown",
-            )
-        else:
-            # Split into chunks
-            chunks = _split_message(analysis_text, MAX_TELEGRAM_MSG_LENGTH)
-            for i, chunk in enumerate(chunks):
+        chunks = _split_message(analysis_text, MAX_TELEGRAM_MSG_LENGTH)
+        for chunk in chunks:
+            try:
                 await update.message.reply_text(
                     chunk,
                     parse_mode="Markdown",
                 )
+            except Exception as e:
+                logger.warning(f"Markdown parse error, sending as plain text: {e}")
+                # Fallback to plain text if Telegram rejects the markdown
+                await update.message.reply_text(chunk)
 
     except Exception as e:
         logger.error(f"Analyze handler error for {ticker}: {e}")
