@@ -24,8 +24,8 @@ httpx==0.28.1
 
 # === Stock Data ===
 yfinance==1.3.0
-pandas==2.2.3
-pandas-ta @ git+https://github.com/twopirllc/pandas-ta.git@main
+pandas
+pandas-ta
 
 # === Scheduler ===
 apscheduler==3.10.4
