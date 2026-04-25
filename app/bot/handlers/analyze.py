@@ -78,23 +78,29 @@ async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         # 3. Send Score Card (deterministic results)
         if score_card:
-            await update.message.reply_text(
-                f"```\n{score_card}\n```",
-                parse_mode="Markdown",
-            )
+            try:
+                await update.message.reply_text(
+                    f"```\n{score_card}\n```",
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.warning(f"Score card markdown failed, sending as plain text: {e}")
+                await update.message.reply_text(f"SCORE CARD {ticker}:\n{score_card}")
 
         # 4. Send the analysis (handle Telegram's 4096 char limit)
         chunks = _split_message(analysis_text, MAX_TELEGRAM_MSG_LENGTH)
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
+            if not chunk.strip():
+                continue
             try:
                 await update.message.reply_text(
                     chunk,
                     parse_mode="Markdown",
                 )
             except Exception as e:
-                logger.warning(f"Markdown parse error, sending as plain text: {e}")
+                logger.warning(f"Analysis chunk {i} markdown failed, sending as plain text: {e}")
                 # Fallback to plain text if Telegram rejects the markdown
-                await update.message.reply_text(chunk)
+                await update.message.reply_text(chunk, parse_mode=None)
 
     except Exception as e:
         logger.error(f"Analyze handler error for {ticker}: {e}")
@@ -103,10 +109,9 @@ async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
         await update.message.reply_text(
-            f"❌ Terjadi kesalahan saat menganalisis **{ticker}**.\n"
+            f"❌ Terjadi kesalahan saat menganalisis {ticker}.\n"
             f"Silakan coba lagi dalam beberapa saat.\n\n"
-            f"_Error: {str(e)[:100]}_",
-            parse_mode="Markdown",
+            f"Error: {str(e)[:200]}",
         )
 
 
