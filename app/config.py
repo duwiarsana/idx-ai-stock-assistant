@@ -53,24 +53,21 @@ class Settings(BaseSettings):
     telegram_admin_id: Optional[str] = None
 
     # ── LLM ──────────────────────────────────────────
-    llm_provider: str = "gemini"  # "gemini", "deepseek", or "ollama"
+    llm_provider: str = "qwen"  # "qwen" (primary), "groq" (fallback), "gemini" (backup)
     
-    # Gemini (Native support)
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
-
-    # DeepSeek (OpenAI-compatible)
-    deepseek_api_key: str = ""
-    deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
-
-    # Groq (OpenAI-compatible)
+    # Qwen3.5-397b (Primary - Most Powerful)
+    qwen_api_key: str = "qwen"  # Empty for local/opencode
+    qwen_base_url: str = "http://localhost:8000/v1"  # Opencode MCP or local
+    qwen_model: str = "qwen3.5-397b"
+    
+    # Groq (Secondary - Fast, Free)
     groq_api_key: str = ""
     groq_base_url: str = "https://api.groq.com/openai/v1"
     groq_model: str = "llama-3.3-70b-versatile"
-
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "gemma2:9b"
+    
+    # Gemini (Tertiary - Backup)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
 
     # ── Stock Data ───────────────────────────────────
     stock_cache_ttl: int = 300  # 5 minutes

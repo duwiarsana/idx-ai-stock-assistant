@@ -10,6 +10,14 @@ Design choices
 * The LLM receives the pre-computed score card and **explains** it, rather
   than inventing its own numbers.
 * Weights are configurable via the ``INDICATOR_WEIGHTS`` dict.
+
+Enhanced Features (Phase 1)
+---------------------------
+* Integration with EnhancedTechnicalEngine (130+ indicators)
+* Multi-timeframe analysis support
+* Divergence detection (RSI, MACD)
+* Candlestick pattern recognition
+* Professional-grade support/resistance levels
 """
 
 from __future__ import annotations
@@ -21,6 +29,12 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+
+from app.services.enhanced_technicals import (
+    EnhancedTechnicalEngine,
+    TechnicalAnalysisResult,
+    format_technical_summary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -552,3 +566,77 @@ def format_score_card(result: AnalysisResult) -> str:
         lines.insert(-1, f"│ 🤖 ML: {ml_dir} ({ml_pct}) | Combined: {combined}")
 
     return "\n".join(lines)
+
+
+# ── Enhanced Analysis Functions (Phase 1) ─────────────────────────────────
+
+def analyze_enhanced(ticker: str, history: list[dict]) -> Optional[TechnicalAnalysisResult]:
+    """Run enhanced technical analysis with 130+ indicators.
+    
+    Uses the EnhancedTechnicalEngine for comprehensive analysis including:
+    - 130+ technical indicators via pandas-ta
+    - Divergence detection (RSI, MACD)
+    - Candlestick pattern recognition
+    - Professional support/resistance levels
+    - Multi-category scoring (Trend, Momentum, Volatility, Volume)
+    
+    Parameters
+    ----------
+    ticker : str
+        Stock ticker symbol
+    history : list[dict]
+        OHLCV history with keys: date, open, high, low, close, volume
+    
+    Returns
+    -------
+    TechnicalAnalysisResult or None if insufficient data
+    """
+    if not history or len(history) < 50:
+        logger.warning(f"Insufficient history for enhanced analysis: {len(history) if history else 0} bars")
+        return None
+    
+    df = pd.DataFrame(history)
+    
+    try:
+        engine = EnhancedTechnicalEngine()
+        result = engine.analyze(df, ticker)
+        
+        logger.info(
+            f"Enhanced analysis for {ticker}: "
+            f"signal={result.signal}, score={result.composite_score}, "
+            f"trend={result.trend_direction}"
+        )
+        
+        return result
+    
+    except Exception as e:
+        logger.error(f"Enhanced analysis error for {ticker}: {e}")
+        return None
+
+
+def format_enhanced_summary(result: TechnicalAnalysisResult) -> str:
+    """Format enhanced technical analysis for Telegram display."""
+    return format_technical_summary(result)
+
+
+def get_enhanced_signal_summary(result: TechnicalAnalysisResult) -> dict:
+    """Get concise signal summary for AI/LLM consumption."""
+    return {
+        'ticker': result.ticker,
+        'signal': result.signal,
+        'signal_strength': result.signal_strength,
+        'composite_score': result.composite_score,
+        'trend_direction': result.trend_direction,
+        'category_scores': {
+            'trend': result.trend_score,
+            'momentum': result.momentum_score,
+            'volatility': result.volatility_score,
+            'volume': result.volume_score,
+        },
+        'patterns_detected': len(result.candlestick_patterns),
+        'divergences_detected': len(result.divergences),
+        'key_levels': {
+            'supports': [s['level'] for s in result.support_levels[:2]],
+            'resistances': [r['level'] for r in result.resistance_levels[:2]],
+        },
+    }

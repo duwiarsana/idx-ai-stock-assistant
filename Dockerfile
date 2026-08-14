@@ -20,9 +20,9 @@ WORKDIR /app
 COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
-# Install runtime deps only
+# Install runtime deps for ML libraries (LightGBM, XGBoost, SHAP)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libpq5 && \
+    apt-get install -y --no-install-recommends libpq5 libgomp1 && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy application code

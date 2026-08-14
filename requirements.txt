@@ -8,6 +8,7 @@ python-dotenv==1.0.1
 # === Database ===
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
+psycopg2-binary==2.9.12
 alembic==1.14.1
 greenlet==3.1.1
 
@@ -27,6 +28,9 @@ yfinance==1.3.0
 pandas
 pandas-ta
 mplfinance
+lxml
+html5lib
+beautifulsoup4
 
 # === Scheduler ===
 apscheduler==3.10.4
@@ -39,3 +43,8 @@ structlog==24.4.0
 scikit-learn>=1.5.0
 joblib>=1.4.0
 numpy>=1.26.0
+
+# === Advanced ML (New) ===
+xgboost>=2.0.0
+lightgbm>=4.0.0
+shap>=0.43.0
