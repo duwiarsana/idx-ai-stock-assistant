@@ -236,9 +236,13 @@ class PaperTrader:
 
     async def _process_candidates(self, session, candidates: list[dict], tickers: dict) -> int:
         if not settings.crypto_paper_trading_enabled:
+            logger.info(f"Paper trading disabled, skipping candidates")
             return 0
         if not candidates:
+            logger.info(f"No candidates to process")
             return 0
+
+        logger.info(f"Processing {len(candidates)} paper candidates")
 
         from sqlalchemy import select
         from app.models.crypto import CryptoPaperPosition
@@ -250,6 +254,7 @@ class PaperTrader:
             )
         )
         open_symbols = {row[0] for row in result.all()}
+        logger.info(f"Open positions: {open_symbols}")
 
         # Symbols that hit SL recently are in cooldown — skip re-entry until
         # the window passes (avoids buying back into a falling knife).
@@ -275,15 +280,21 @@ class PaperTrader:
         # candidate when telegram alerts are off.
         shortlist = []
         for c in sorted(candidates, key=lambda x: x.get("score", 0), reverse=True):
-            if not self._passes_entry_gate(c):
-                continue
             symbol = c.get("symbol")
+            score = c.get("score", 0)
+            passes_gate = self._passes_entry_gate(c)
+            logger.info(f"Candidate {symbol} score={score} passes_gate={passes_gate}")
+            if not passes_gate:
+                continue
             if not symbol or symbol in open_symbols or symbol in cooldown_symbols:
+                logger.info(f"Skipping {symbol}: in open={symbol in open_symbols} or cooldown={symbol in cooldown_symbols}")
                 continue
             price = c.get("price")
             if not price:
                 continue
             shortlist.append(c)
+
+        logger.info(f"Shortlist: {[c.get('symbol') for c in shortlist]}")
 
         if not shortlist:
             return 0
