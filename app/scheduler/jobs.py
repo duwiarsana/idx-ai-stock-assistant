@@ -423,28 +423,38 @@ async def crypto_scan_job():
 
 
 async def crypto_real_tp_sl_check():
-    """Quick TP/SL check for real crypto positions - runs every 30 seconds."""
+    """Quick TP/SL check for real crypto positions - runs every 5 seconds."""
     if not settings.crypto_real_trading_enabled:
-        logger.debug("Crypto real trading disabled, skipping TP/SL check")
         return
     
     try:
         from app.services.crypto_real import real_trader
         from app.db.session import async_session_factory
+        from sqlalchemy import select, func
+        from app.models.crypto import CryptoPaperPosition
         
+        # Quick check: are there any open REAL positions? Skip session if none.
         async with async_session_factory() as session:
+            result = await session.execute(
+                select(func.count()).select_from(CryptoPaperPosition).where(
+                    CryptoPaperPosition.status == "OPEN",
+                    CryptoPaperPosition.mode == "REAL",
+                )
+            )
+            open_count = result.scalar() or 0
+            if open_count == 0:
+                return
+            
             closed = await real_trader.check_tp_sl_quick(session)
             if closed > 0:
                 logger.info(f"⚡ Crypto real TP/SL: {closed} positions closed")
-            else:
-                logger.debug("⚡ Crypto real TP/SL check: no exits needed")
     except Exception as e:
         logger.error(f"Crypto real TP/SL check failed: {e}", exc_info=True)
 
 
 def create_scheduler() -> AsyncIOScheduler:
     """Create and configure the job scheduler."""
-    print("🚀🚀🚀 DEBUG: create_scheduler() STARTED")
+    logger.debug("create_scheduler() started")
     scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
 
     # Update popular stocks every 30 min during market hours (Mon-Fri, 09:00-16:00 WIB)
@@ -461,9 +471,9 @@ def create_scheduler() -> AsyncIOScheduler:
             name="Update Popular Stocks",
             replace_existing=True,
         )
-        print("✅ update_popular_stocks scheduled")
+        logger.debug("update_popular_stocks scheduled")
     except Exception as e:
-        print(f"❌ ERROR scheduling update_popular_stocks: {e}")
+        logger.error(f"Error scheduling update_popular_stocks: {e}")
 
     # Daily scoring at 16:30 WIB (after market close)
     try:
@@ -479,9 +489,9 @@ def create_scheduler() -> AsyncIOScheduler:
             name="Daily Stock Scoring",
             replace_existing=True,
         )
-        print("✅ daily_scoring scheduled")
+        logger.debug("daily_scoring scheduled")
     except Exception as e:
-        print(f"❌ ERROR scheduling daily_scoring: {e}")
+        logger.error(f"Error scheduling daily_scoring: {e}")
 
     # Intraday scanner every hour during market hours (Mon-Fri, 09:00-15:00 WIB)
     scheduler.add_job(
@@ -546,7 +556,7 @@ def create_scheduler() -> AsyncIOScheduler:
     
     # Crypto real TP/SL check - runs every 30 seconds for fast exits
     import sys
-    print(f"🔥🔥🔥 DEBUG: crypto_real_trading_enabled = {settings.crypto_real_trading_enabled}", flush=True)
+    logger.debug(f"crypto_real_trading_enabled = {settings.crypto_real_trading_enabled}")
     try:
         logger.info(f"DEBUG: Checking crypto_real_trading_enabled = {settings.crypto_real_trading_enabled}")
         if settings.crypto_real_trading_enabled:
@@ -562,19 +572,14 @@ def create_scheduler() -> AsyncIOScheduler:
                 replace_existing=True,
             )
             logger.info("✅ Crypto real TP/SL quick check scheduled every 5 seconds")
-            print("✅✅✅ Crypto real TP/SL check SCHEDULED", flush=True)
             
             # Verify job was added
             jobs = scheduler.get_jobs()
             tp_sl_jobs = [j for j in jobs if 'TP/SL' in j.name]
-            print(f"📋 Verified {len(tp_sl_jobs)} TP/SL jobs in scheduler", flush=True)
+            logger.debug(f"Verified {len(tp_sl_jobs)} TP/SL jobs in scheduler")
         else:
             logger.warning("⚠️ Crypto real TP/SL check DISABLED (crypto_real_trading_enabled=false)")
-            print("❌❌❌ Crypto real TP/SL check DISABLED", flush=True)
     except Exception as e:
         logger.error(f"Failed to setup crypto real TP/SL check: {e}", exc_info=True)
-        print(f"💥💥💥 ERROR setting up TP/SL check: {e}", flush=True)
-        import traceback
-        traceback.print_exc(file=sys.stdout, flush=True)
 
     return scheduler
