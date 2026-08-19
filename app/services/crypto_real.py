@@ -48,6 +48,9 @@ class RealTrader:
     def __init__(self):
         from app.data.tokocrypto_trade_client import TokoCryptoTradeClient
         self.client = TokoCryptoTradeClient()
+        # Price cache to avoid rate limiting: {symbol: (price, timestamp)}
+        self._price_cache: dict[str, tuple[float, float]] = {}
+        self._cache_ttl = 10.0  # 10 seconds TTL
         self.state = {
             "enabled": settings.crypto_real_trading_enabled,
             "last_cycle_at": None,
@@ -706,8 +709,18 @@ class RealTrader:
         return line
 
     async def _fetch_price(self, asset: str, quote: str) -> float:
-        """Fetch current price for an asset from Tokocrypto public API."""
-        import httpx
+        """Fetch current price for an asset from Tokocrypto public API with caching."""
+        import time
+        cache_key = f"{asset}_{quote}"
+        now = time.time()
+        
+        # Check cache first
+        if cache_key in self._price_cache:
+            cached_price, cached_time = self._price_cache[cache_key]
+            if now - cached_time < self._cache_ttl:
+                return cached_price
+        
+        # Fetch from API if cache miss or expired
         client = await self.client._get_client()
         for pair_quote in (quote, "IDR"):
             try:
@@ -721,6 +734,8 @@ class RealTrader:
                     if pair_quote == "IDR" and quote == "USDT":
                         # Convert IDR to USDT (approx)
                         price = price / 16000
+                    # Cache the price
+                    self._price_cache[cache_key] = (price, now)
                     return price
             except Exception:
                 continue
