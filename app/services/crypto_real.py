@@ -134,6 +134,46 @@ class RealTrader:
         
         logger.info(f"📝 Real exit cycle done: {closed} positions closed")
         return closed
+    
+    async def check_tp_sl_quick(self, session) -> int:
+        """Quick TP/SL check for real positions - runs every 30 seconds."""
+        from sqlalchemy import select
+        from app.models.crypto import CryptoPaperPosition, CryptoPaperAccount
+
+        result = await session.execute(
+            select(CryptoPaperPosition).where(
+                CryptoPaperPosition.status == STATUS_OPEN,
+                CryptoPaperPosition.mode == "REAL",
+            )
+        )
+        positions = result.scalars().all()
+        
+        if not positions:
+            return 0
+        
+        closed = 0
+        for pos in positions:
+            try:
+                price = await self._fetch_price_from_symbol(pos.symbol, pos.quote)
+                if price is None or price == 0:
+                    continue
+                
+                action = self._decide_exit(pos, price)
+                
+                if action is not None:
+                    logger.info(f"⚡ {pos.symbol}: Quick TP/SL exit = {action} at {price:.6f}")
+                    account = await self._get_or_create_account(session, pos.quote)
+                    ok = await self._close_position(session, pos, account, action, price)
+                    if ok:
+                        closed += 1
+                        logger.info(f"✅ {pos.symbol}: Quick exit successful ({action})")
+            except Exception as e:
+                logger.warning(f"⚡ {pos.symbol}: Quick exit error: {e}")
+        
+        if closed > 0:
+            logger.info(f"⚡ Quick TP/SL check: {closed} positions closed")
+        
+        return closed
 
     def _decide_exit(self, pos, price: float) -> Optional[str]:
         sl = pos.stop_loss

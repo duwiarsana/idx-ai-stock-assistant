@@ -422,6 +422,23 @@ async def crypto_scan_job():
         logger.exception(f"Crypto scan job raised: {e}")
 
 
+async def crypto_real_tp_sl_check():
+    """Quick TP/SL check for real crypto positions - runs every 30 seconds."""
+    if not settings.crypto_real_trading_enabled:
+        return
+    
+    try:
+        from app.services.crypto_real import real_trader
+        from app.db.session import async_session_factory
+        
+        async with async_session_factory() as session:
+            closed = await real_trader.check_tp_sl_quick(session)
+            if closed > 0:
+                logger.info(f"⚡ Crypto real TP/SL: {closed} positions closed")
+    except Exception as e:
+        logger.warning(f"Crypto real TP/SL check failed: {e}")
+
+
 def create_scheduler() -> AsyncIOScheduler:
     """Create and configure the job scheduler."""
     scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
@@ -514,5 +531,20 @@ def create_scheduler() -> AsyncIOScheduler:
             replace_existing=True,
         )
         logger.info(f"Crypto scanner scheduled every {settings.crypto_scan_interval_minutes} minutes")
+    
+    # Crypto real TP/SL check - runs every 30 seconds for fast exits
+    if settings.crypto_real_trading_enabled:
+        from apscheduler.triggers.interval import IntervalTrigger
+        scheduler.add_job(
+            crypto_real_tp_sl_check,
+            IntervalTrigger(
+                seconds=30,
+                timezone="Asia/Jakarta",
+            ),
+            id="crypto_real_tp_sl_check",
+            name="Crypto Real TP/SL Quick Check",
+            replace_existing=True,
+        )
+        logger.info("Crypto real TP/SL quick check scheduled every 30 seconds")
 
     return scheduler
