@@ -425,6 +425,7 @@ async def crypto_scan_job():
 async def crypto_real_tp_sl_check():
     """Quick TP/SL check for real crypto positions - runs every 30 seconds."""
     if not settings.crypto_real_trading_enabled:
+        logger.debug("Crypto real trading disabled, skipping TP/SL check")
         return
     
     try:
@@ -435,8 +436,10 @@ async def crypto_real_tp_sl_check():
             closed = await real_trader.check_tp_sl_quick(session)
             if closed > 0:
                 logger.info(f"⚡ Crypto real TP/SL: {closed} positions closed")
+            else:
+                logger.debug("⚡ Crypto real TP/SL check: no exits needed")
     except Exception as e:
-        logger.warning(f"Crypto real TP/SL check failed: {e}")
+        logger.error(f"Crypto real TP/SL check failed: {e}", exc_info=True)
 
 
 def create_scheduler() -> AsyncIOScheduler:
