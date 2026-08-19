@@ -93,8 +93,20 @@ async def crypto_positions_summary():
     from app.models.crypto import CryptoPaperPosition
     import httpx
     
-    # Fetch current prices from Tokocrypto API
+    # Fetch current prices from Tokocrypto API with caching
+    _price_cache: dict[str, tuple[float, float]] = {}
+    _cache_ttl = 10.0  # 10 seconds
+    
     async def get_current_price(symbol: str) -> float:
+        import time
+        now = time.time()
+        
+        # Check cache first
+        if symbol in _price_cache:
+            cached_price, cached_time = _price_cache[symbol]
+            if now - cached_time < _cache_ttl:
+                return cached_price
+        
         try:
             base = symbol.replace("_USDT", "").lower()
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -105,6 +117,8 @@ async def crypto_positions_summary():
                     data = response.json()
                     price = float(data.get("lastPrice", 0))
                     if price > 0:
+                        # Cache the price
+                        _price_cache[symbol] = (price, now)
                         return price
         except Exception as e:
             logger.warning(f"Failed to fetch price for {symbol}: {e}")
