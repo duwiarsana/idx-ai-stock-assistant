@@ -16,7 +16,7 @@ settings = get_settings()
 
 # Global price cache for dashboard API
 _PRICE_CACHE: dict[str, tuple[float, float]] = {}
-_PRICE_CACHE_TTL = 15.0  # 15 seconds
+_PRICE_CACHE_TTL = 30.0  # 30 seconds (reduce API calls)
 
 
 @router.get("/scanner/status")
