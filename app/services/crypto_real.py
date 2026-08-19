@@ -557,36 +557,59 @@ class RealTrader:
         await self._send_telegram(text)
 
     async def _portfolio_summary(self, quote: str = "USDT") -> str:
-        """Build a full portfolio summary: balance, holdings value, total, PnL."""
-        try:
-            balances = await self.client.get_balances()
-        except Exception:
-            balances = {}
-
-        cash = balances.get(quote, 0.0)
-
-        # Fetch current prices for held assets
-        holdings_value = 0.0
-        holdings_lines = []
-        for asset, free in sorted(balances.items()):
-            if asset == quote or free <= 0:
-                continue
-            try:
-                price = await self._fetch_price(asset, quote)
-            except Exception:
-                price = 0.0
-            value = free * price
-            holdings_value += value
-            holdings_lines.append(f"  • {asset}: {free:.8g} (≈ {_fmt_price(value)} {quote})")
-
-        total_value = cash + holdings_value
-        holdings_text = "\n".join(holdings_lines) if holdings_lines else "  _(tidak ada)_"
-
-        # Realized PnL from REAL positions only
+        """Build portfolio summary: only show bot-traded positions (not full exchange balance)."""
+        
+        # Get open positions from database (only bot-traded coins)
         from app.db.session import async_session_factory
-        from sqlalchemy import select, func
+        from sqlalchemy import select
         from app.models.crypto import CryptoPaperPosition
-
+        
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(CryptoPaperPosition)
+                .where(
+                    CryptoPaperPosition.status == "OPEN",
+                    CryptoPaperPosition.mode == "REAL",
+                    CryptoPaperPosition.quote == quote
+                )
+            )
+            open_positions = result.scalars().all()
+        
+        if not open_positions:
+            return f"\n💼 *Portfolio:* Tidak ada posisi terbuka\n"
+        
+        # Build holdings from open positions only
+        holdings_lines = []
+        total_held_value = 0
+        
+        for pos in open_positions:
+            try:
+                price = await self._fetch_price_from_symbol(pos.symbol, quote)
+            except Exception:
+                price = pos.entry_price  # fallback to entry price
+            
+            value = pos.quantity * price
+            total_held_value += value
+            pnl = (price - pos.entry_price) * pos.quantity
+            pnl_pct = ((price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price > 0 else 0
+            
+            emoji = "🟢" if pnl >= 0 else "🔴"
+            holdings_lines.append(
+                f"  {emoji} {pos.display}: {pos.quantity:.4f} @ {price:.6f} "
+                f"(≈ {value:.2f} {quote}, {pnl:+.2f} {quote}/{pnl_pct:+.1f}%)"
+            )
+        
+        holdings_text = "\n".join(holdings_lines)
+        
+        # Get cash balance (optional, can be skipped for cleaner output)
+        try:
+            cash = await self._real_balance(quote)
+        except Exception:
+            cash = 0.0
+        
+        total_value = cash + total_held_value
+        
+        # Realized PnL from REAL positions only
         realized = 0.0
         total_trades = 0
         winning = 0
@@ -614,11 +637,11 @@ class RealTrader:
 
         pnl_emoji = "✅" if realized >= 0 else "🔻"
         line = "\n━━━━━━━━━━━━━━━━━━━━\n"
-        line += "💼 *PORTOFOLIO REAL*\n\n"
+        line += "💼 *PORTOFOLIO BOT (REAL)*\n\n"
+        line += f"📊 *Posisi Terbuka ({len(open_positions)}):*\n{holdings_text}\n"
         line += f"💰 Saldo {quote}: **{_fmt_price(cash)}**\n"
-        line += f"📊 Holdings:\n{holdings_text}\n"
-        line += f"🏦 Total Holdings: **{_fmt_price(holdings_value)} {quote}**\n"
-        line += f"💵 *TOTAL KESELURUHAN: **{_fmt_price(total_value)} {quote}***\n\n"
+        line += f"🏦 Total Invested: **{_fmt_price(total_held_value)} {quote}**\n"
+        line += f"💵 *TOTAL VALUE: **{_fmt_price(total_value)} {quote}***\n\n"
         line += f"{pnl_emoji} Total Realized PnL: **{realized:+,.2f} {quote}**\n"
         line += f"📊 Total Trade: {total_trades} ({winning} menang, {total_trades - winning} rugi)\n"
         line += "━━━━━━━━━━━━━━━━━━━━"
@@ -639,16 +662,16 @@ class RealTrader:
                 if price > 0:
                     if pair_quote == "IDR" and quote == "USDT":
                         # Convert IDR to USDT (approx)
-                        usdt_resp = await client.get(
-                            "https://www.tokocrypto.site/api/v3/ticker/price",
-                            params={"symbol": "USDTIDR"},
-                        )
-                        usdt_idr = float(usdt_resp.json().get("price", 15800))
-                        return price / usdt_idr
+                        price = price / 16000
                     return price
             except Exception:
                 continue
         return 0.0
+
+    async def _fetch_price_from_symbol(self, symbol: str, quote: str) -> float:
+        """Fetch current price for a symbol like 'PENGU_USDT'."""
+        base = symbol.replace(f"_{quote}", "").lower()
+        return await self._fetch_price(base.upper(), quote)
 
     @staticmethod
     def _account_summary_text(account, real_balance: Optional[float] = None) -> str:
