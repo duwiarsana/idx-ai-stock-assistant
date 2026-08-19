@@ -545,7 +545,8 @@ def create_scheduler() -> AsyncIOScheduler:
         logger.info(f"Crypto scanner scheduled every {settings.crypto_scan_interval_minutes} minutes")
     
     # Crypto real TP/SL check - runs every 30 seconds for fast exits
-    print(f"🔥🔥🔥 DEBUG: crypto_real_trading_enabled = {settings.crypto_real_trading_enabled}")
+    import sys
+    print(f"🔥🔥🔥 DEBUG: crypto_real_trading_enabled = {settings.crypto_real_trading_enabled}", flush=True)
     try:
         logger.info(f"DEBUG: Checking crypto_real_trading_enabled = {settings.crypto_real_trading_enabled}")
         if settings.crypto_real_trading_enabled:
@@ -561,19 +562,19 @@ def create_scheduler() -> AsyncIOScheduler:
                 replace_existing=True,
             )
             logger.info("✅ Crypto real TP/SL quick check scheduled every 30 seconds")
-            print("✅✅✅ Crypto real TP/SL check SCHEDULED")
+            print("✅✅✅ Crypto real TP/SL check SCHEDULED", flush=True)
             
             # Verify job was added
             jobs = scheduler.get_jobs()
             tp_sl_jobs = [j for j in jobs if 'TP/SL' in j.name]
-            print(f"📋 Verified {len(tp_sl_jobs)} TP/SL jobs in scheduler")
+            print(f"📋 Verified {len(tp_sl_jobs)} TP/SL jobs in scheduler", flush=True)
         else:
             logger.warning("⚠️ Crypto real TP/SL check DISABLED (crypto_real_trading_enabled=false)")
-            print("❌❌❌ Crypto real TP/SL check DISABLED")
+            print("❌❌❌ Crypto real TP/SL check DISABLED", flush=True)
     except Exception as e:
         logger.error(f"Failed to setup crypto real TP/SL check: {e}", exc_info=True)
-        print(f"💥💥💥 ERROR setting up TP/SL check: {e}")
+        print(f"💥💥💥 ERROR setting up TP/SL check: {e}", flush=True)
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stdout, flush=True)
 
     return scheduler
