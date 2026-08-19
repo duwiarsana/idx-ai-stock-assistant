@@ -536,21 +536,24 @@ def create_scheduler() -> AsyncIOScheduler:
         logger.info(f"Crypto scanner scheduled every {settings.crypto_scan_interval_minutes} minutes")
     
     # Crypto real TP/SL check - runs every 30 seconds for fast exits
-    logger.info(f"DEBUG: crypto_real_trading_enabled = {settings.crypto_real_trading_enabled}")
-    if settings.crypto_real_trading_enabled:
-        from apscheduler.triggers.interval import IntervalTrigger
-        scheduler.add_job(
-            crypto_real_tp_sl_check,
-            IntervalTrigger(
-                seconds=30,
-                timezone="Asia/Jakarta",
-            ),
-            id="crypto_real_tp_sl_check",
-            name="Crypto Real TP/SL Quick Check",
-            replace_existing=True,
-        )
-        logger.info("✅ Crypto real TP/SL quick check scheduled every 30 seconds")
-    else:
-        logger.warning("⚠️ Crypto real TP/SL check DISABLED (crypto_real_trading_enabled=false)")
+    try:
+        logger.info(f"DEBUG: Checking crypto_real_trading_enabled = {settings.crypto_real_trading_enabled}")
+        if settings.crypto_real_trading_enabled:
+            from apscheduler.triggers.interval import IntervalTrigger
+            scheduler.add_job(
+                crypto_real_tp_sl_check,
+                IntervalTrigger(
+                    seconds=30,
+                    timezone="Asia/Jakarta",
+                ),
+                id="crypto_real_tp_sl_check",
+                name="Crypto Real TP/SL Quick Check",
+                replace_existing=True,
+            )
+            logger.info("✅ Crypto real TP/SL quick check scheduled every 30 seconds")
+        else:
+            logger.warning("⚠️ Crypto real TP/SL check DISABLED (crypto_real_trading_enabled=false)")
+    except Exception as e:
+        logger.error(f"Failed to setup crypto real TP/SL check: {e}", exc_info=True)
 
     return scheduler
