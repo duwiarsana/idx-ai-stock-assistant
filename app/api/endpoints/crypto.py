@@ -46,6 +46,141 @@ async def crypto_scanner_latest(limit: int = 10):
     }
 
 
+@router.get("/dashboard/potential")
+async def crypto_potential_coins(limit: int = 10, min_score: int = 55):
+    """Get potential coins to buy - ranked by momentum score."""
+    results = crypto_scanner.state.get("last_results", [])
+    filtered = [r for r in results if r.get("score", 0) >= min_score]
+    sorted_results = sorted(filtered, key=lambda x: x.get("score", 0), reverse=True)[:limit]
+    
+    # Enrich with TP/SL levels
+    enriched = []
+    for r in sorted_results:
+        levels = r.get("price_levels") or {}
+        enriched.append({
+            "symbol": r.get("symbol"),
+            "display": r.get("display"),
+            "score": round(r.get("score", 0), 2),
+            "price": r.get("tf_summaries", {}).get("1h", {}).get("price"),
+            "trend": r.get("tf_summaries", {}).get("1h", {}).get("trend"),
+            "momentum_score": round(r.get("scores", {}).get("momentum", 0), 2),
+            "buy_reason": r.get("ai_verdict", {}).get("reason", [])[:3],
+            "entry_level": levels.get("entry"),
+            "take_profit_1": levels.get("take_profit_1"),
+            "take_profit_2": levels.get("take_profit_2"),
+            "stop_loss": levels.get("stop_loss"),
+            "risk_reward": levels.get("risk_reward"),
+            "recommended_allocation": "5-10% of portfolio",
+        })
+    
+    return {
+        "status": "success",
+        "data": {
+            "last_scan_at": crypto_scanner.state.get("last_scan_at"),
+            "total_candidates": len(filtered),
+            "showing": len(enriched),
+            "min_score_filter": min_score,
+            "coins": enriched,
+        },
+    }
+
+
+@router.get("/dashboard/positions")
+async def crypto_positions_summary():
+    """Get current open positions and performance summary."""
+    from sqlalchemy import select, func, desc
+    from app.db.session import async_session_factory
+    from app.models.crypto import CryptoPaperPosition
+    
+    async with async_session_factory() as session:
+        # Open positions
+        result = await session.execute(
+            select(CryptoPaperPosition)
+            .where(CryptoPaperPosition.status == "OPEN")
+            .order_by(desc(CryptoPaperPosition.created_at))
+        )
+        open_positions = result.scalars().all()
+        
+        # Recent closed positions (last 20)
+        result = await session.execute(
+            select(CryptoPaperPosition)
+            .where(CryptoPaperPosition.status == "CLOSED")
+            .order_by(desc(CryptoPaperPosition.closed_at))
+            .limit(20)
+        )
+        closed_positions = result.scalars().all()
+        
+        # Performance stats by mode
+        stats_result = await session.execute(
+            select(
+                CryptoPaperPosition.mode,
+                func.count().label("total"),
+                func.sum(func.case((CryptoPaperPosition.status == "OPEN", 1), else_=0)).label("open_count"),
+                func.sum(func.case((CryptoPaperPosition.realized_pnl > 0, 1), else_=0)).label("wins"),
+                func.sum(func.case((CryptoPaperPosition.realized_pnl < 0, 1), else_=0)).label("losses"),
+                func.sum(CryptoPaperPosition.realized_pnl).label("total_pnl"),
+                func.avg(CryptoPaperPosition.realized_pnl).label("avg_pnl"),
+            )
+            .group_by(CryptoPaperPosition.mode)
+        )
+        stats = result.scalars().all()
+        
+        open_data = [
+            {
+                "symbol": p.symbol,
+                "mode": p.mode,
+                "entry_price": round(p.entry_price, 6),
+                "quantity": round(p.quantity, 4),
+                "invested": round(p.invested, 2),
+                "take_profit_1": round(p.take_profit_1, 6) if p.take_profit_1 else None,
+                "take_profit_2": round(p.take_profit_2, 6) if p.take_profit_2 else None,
+                "stop_loss": round(p.stop_loss, 6) if p.stop_loss else None,
+                "entry_score": round(p.entry_score, 2) if p.entry_score else None,
+                "entry_reason": p.entry_reason,
+                "opened_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in open_positions
+        ]
+        
+        closed_data = [
+            {
+                "symbol": p.symbol,
+                "mode": p.mode,
+                "entry_price": round(p.entry_price, 6),
+                "exit_price": round(p.exit_price, 6) if p.exit_price else None,
+                "pnl": round(p.realized_pnl, 4),
+                "pnl_pct": round((p.realized_pnl / p.invested * 100), 2) if p.invested and p.invested > 0 else None,
+                "exit_reason": p.exit_reason,
+                "entry_date": p.created_at.strftime("%Y-%m-%d") if p.created_at else None,
+                "exit_date": p.closed_at.strftime("%Y-%m-%d %H:%M") if p.closed_at else None,
+            }
+            for p in closed_positions
+        ]
+        
+        stats_data = [
+            {
+                "mode": s.mode,
+                "total_trades": s.total,
+                "open_positions": s.open_count,
+                "wins": s.wins,
+                "losses": s.losses,
+                "win_rate": round((s.wins / s.total * 100), 1) if s.total and s.total > 0 else 0,
+                "total_pnl": round(s.total_pnl, 2) if s.total_pnl else 0,
+                "avg_pnl": round(s.avg_pnl, 4) if s.avg_pnl else 0,
+            }
+            for s in stats
+        ]
+    
+    return {
+        "status": "success",
+        "data": {
+            "open_positions": open_data,
+            "closed_positions": closed_data,
+            "performance_stats": stats_data,
+        },
+    }
+
+
 @router.get("/scanner/config")
 async def crypto_scanner_config():
     """Expose scanner configuration (safe subset — no secrets)."""
@@ -241,3 +376,15 @@ async def crypto_paper_history(limit: int = 20):
         logger.warning(f"Failed to load paper history: {e}")
         data = []
     return {"status": "success", "data": data}
+
+
+@router.get("/dashboard")
+async def crypto_dashboard_html():
+    """Serve the crypto trading dashboard HTML page."""
+    from fastapi.responses import HTMLResponse
+    from pathlib import Path
+    
+    template_path = Path(__file__).parent.parent.parent / "templates" / "crypto_dashboard.html"
+    if template_path.exists():
+        return HTMLResponse(content=template_path.read_text())
+    return HTMLResponse(content="<h1>Dashboard template not found</h1>", status_code=500)
