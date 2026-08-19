@@ -91,6 +91,20 @@ async def crypto_positions_summary():
     from sqlalchemy import select, func, desc
     from app.db.session import async_session_factory
     from app.models.crypto import CryptoPaperPosition
+    import httpx
+    
+    # Fetch current prices from Tokocrypto API
+    async def get_current_price(symbol: str) -> float:
+        try:
+            base = symbol.replace("_USDT", "").lower()
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    f"https://www.tokocrypto.site/api/v3/ticker/24hr?symbol={base.upper()}USDT"
+                )
+                data = response.json()
+                return float(data.get("lastPrice", 0))
+        except:
+            return 0
     
     async with async_session_factory() as session:
         # Open positions
@@ -127,26 +141,38 @@ async def crypto_positions_summary():
         )
         stats = result.scalars().all()
         
-        open_data = [
-            {
+        # Enrich open positions with current prices and unrealized PnL
+        open_data = []
+        for p in open_positions:
+            current_price = await get_current_price(p.symbol)
+            unrealized_pnl = 0
+            unrealized_pnl_pct = 0
+            if current_price > 0 and p.entry_price > 0:
+                unrealized_pnl = (current_price - p.entry_price) * p.quantity
+                unrealized_pnl_pct = ((current_price - p.entry_price) / p.entry_price) * 100
+            
+            open_data.append({
                 "symbol": p.symbol,
+                "display": p.display,
                 "mode": p.mode,
                 "entry_price": round(p.entry_price, 6),
+                "current_price": round(current_price, 6) if current_price > 0 else None,
                 "quantity": round(p.quantity, 4),
                 "invested": round(p.invested, 2),
+                "unrealized_pnl": round(unrealized_pnl, 4),
+                "unrealized_pnl_pct": round(unrealized_pnl_pct, 2),
                 "take_profit_1": round(p.take_profit_1, 6) if p.take_profit_1 else None,
                 "take_profit_2": round(p.take_profit_2, 6) if p.take_profit_2 else None,
                 "stop_loss": round(p.stop_loss, 6) if p.stop_loss else None,
                 "entry_score": round(p.entry_score, 2) if p.entry_score else None,
                 "entry_reason": p.entry_reason,
                 "opened_at": p.created_at.isoformat() if p.created_at else None,
-            }
-            for p in open_positions
-        ]
+            })
         
         closed_data = [
             {
                 "symbol": p.symbol,
+                "display": p.display,
                 "mode": p.mode,
                 "entry_price": round(p.entry_price, 6),
                 "exit_price": round(p.exit_price, 6) if p.exit_price else None,

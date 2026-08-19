@@ -125,19 +125,23 @@
 
             <!-- Open Positions -->
             <div class="bg-white rounded-xl shadow-md p-6 mb-8">
-                <h2 class="text-xl font-bold text-gray-800 mb-6">📊 Posisi Terbuka</h2>
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-bold text-gray-800">📊 Posisi Terbuka</h2>
+                    <span class="text-sm text-gray-500" id="totalUnrealizedPnL">-</span>
+                </div>
                 <div class="overflow-x-auto">
                     <table class="w-full">
                         <thead class="bg-gray-50">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Coin</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Entry</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Current</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Invested</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Unrealized PnL</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">TP1</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">TP2</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">SL</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Score</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Opened</th>
                             </tr>
                         </thead>
                         <tbody id="openTable" class="divide-y divide-gray-100">
@@ -237,22 +241,45 @@
             
             // Render open positions
             const openTable = document.getElementById('openTable');
-            openTable.innerHTML = openPositions.length > 0 ? openPositions.map(pos => `
-                <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3 font-semibold">${pos.display || pos.symbol}</td>
-                    <td class="px-4 py-3 text-sm">${pos.entry_price.toFixed(6)}</td>
-                    <td class="px-4 py-3 text-sm font-semibold">${pos.invested.toFixed(2)} USDT</td>
-                    <td class="px-4 py-3 text-sm text-green-600">${pos.take_profit_1 ? pos.take_profit_1.toFixed(6) : '-'}</td>
-                    <td class="px-4 py-3 text-sm text-green-600">${pos.take_profit_2 ? pos.take_profit_2.toFixed(6) : '-'}</td>
-                    <td class="px-4 py-3 text-sm text-red-600">${pos.stop_loss ? pos.stop_loss.toFixed(6) : '-'}</td>
-                    <td class="px-4 py-3 text-sm">
-                        <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
-                            ${pos.entry_score ? pos.entry_score.toFixed(0) : '-'}
-                        </span>
-                    </td>
-                    <td class="px-4 py-3 text-xs text-gray-600">${pos.opened_at ? new Date(pos.opened_at).toLocaleString('id-ID') : '-'}</td>
-                </tr>
-            `).join('') : '<tr><td colspan="8" class="px-4 py-6 text-center text-gray-500">Tidak ada posisi terbuka</td></tr>';
+            let totalUnrealizedPnL = 0;
+            openTable.innerHTML = openPositions.length > 0 ? openPositions.map(pos => {
+                if (pos.unrealized_pnl) totalUnrealizedPnL += pos.unrealized_pnl;
+                const pnlColor = pos.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600';
+                const pnlBg = pos.unrealized_pnl >= 0 ? 'bg-green-100' : 'bg-red-100';
+                return `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-semibold">${pos.display || pos.symbol}</td>
+                        <td class="px-4 py-3 text-sm">${pos.entry_price.toFixed(6)}</td>
+                        <td class="px-4 py-3 text-sm font-semibold ${pos.current_price >= pos.entry_price ? 'text-green-600' : 'text-red-600'}">
+                            ${pos.current_price ? pos.current_price.toFixed(6) : '-'}
+                        </td>
+                        <td class="px-4 py-3 text-sm font-semibold">${pos.invested.toFixed(2)} USDT</td>
+                        <td class="px-4 py-3">
+                            <div class="flex flex-col">
+                                <span class="px-2 py-1 ${pnlBg} ${pnlColor} rounded text-xs font-semibold">
+                                    ${pos.unrealized_pnl >= 0 ? '+' : ''}${pos.unrealized_pnl.toFixed(2)} USDT
+                                </span>
+                                <span class="text-xs ${pnlColor} mt-1">
+                                    ${pos.unrealized_pnl_pct >= 0 ? '+' : ''}${pos.unrealized_pnl_pct.toFixed(2)}%
+                                </span>
+                            </div>
+                        </td>
+                        <td class="px-4 py-3 text-sm text-green-600">${pos.take_profit_1 ? pos.take_profit_1.toFixed(6) : '-'}</td>
+                        <td class="px-4 py-3 text-sm text-green-600">${pos.take_profit_2 ? pos.take_profit_2.toFixed(6) : '-'}</td>
+                        <td class="px-4 py-3 text-sm text-red-600">${pos.stop_loss ? pos.stop_loss.toFixed(6) : '-'}</td>
+                        <td class="px-4 py-3 text-sm">
+                            <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
+                                ${pos.entry_score ? pos.entry_score.toFixed(0) : '-'}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            }).join('') : '<tr><td colspan="9" class="px-4 py-6 text-center text-gray-500">Tidak ada posisi terbuka</td></tr>';
+            
+            // Update total unrealized PnL
+            const totalPnLElement = document.getElementById('totalUnrealizedPnL');
+            totalPnLElement.textContent = `Total: ${totalUnrealizedPnL >= 0 ? '+' : ''}${totalUnrealizedPnL.toFixed(2)} USDT`;
+            totalPnLElement.className = 'text-sm font-semibold ' + (totalUnrealizedPnL >= 0 ? 'text-green-600' : 'text-red-600');
             
             // Render closed positions
             const closedTable = document.getElementById('closedTable');
