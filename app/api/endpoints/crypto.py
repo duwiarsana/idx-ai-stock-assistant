@@ -97,14 +97,18 @@ async def crypto_positions_summary():
     async def get_current_price(symbol: str) -> float:
         try:
             base = symbol.replace("_USDT", "").lower()
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     f"https://www.tokocrypto.site/api/v3/ticker/24hr?symbol={base.upper()}USDT"
                 )
-                data = response.json()
-                return float(data.get("lastPrice", 0))
-        except:
-            return 0
+                if response.status_code == 200:
+                    data = response.json()
+                    price = float(data.get("lastPrice", 0))
+                    if price > 0:
+                        return price
+        except Exception as e:
+            logger.warning(f"Failed to fetch price for {symbol}: {e}")
+        return 0
     
     async with async_session_factory() as session:
         # Open positions
