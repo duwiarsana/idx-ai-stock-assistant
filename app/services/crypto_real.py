@@ -98,6 +98,9 @@ class RealTrader:
             )
         )
         positions = result.scalars().all()
+        
+        logger.info(f"🔍 Checking {len(positions)} open REAL positions for TP/SL exits")
+        
         if not positions:
             return 0
 
@@ -106,16 +109,30 @@ class RealTrader:
             try:
                 price = self._current_price(tickers, pos.symbol)
                 if price is None:
+                    logger.warning(f"⚠️ No price for {pos.symbol}, skipping")
                     continue
+                
                 action = self._decide_exit(pos, price)
+                
                 if action is None:
+                    # Check if price is close to TP/SL for logging
+                    if pos.take_profit_1:
+                        dist_tp1 = ((price - pos.take_profit_1) / pos.take_profit_1 * 100)
+                        logger.debug(f"📊 {pos.symbol}: price={price:.6f}, TP1={pos.take_profit_1:.6f} (diff: {dist_tp1:+.2f}%), no exit yet")
                     continue
+                
+                logger.info(f"🎯 {pos.symbol}: Exit signal = {action} at price {price:.6f}")
                 account = await self._get_or_create_account(session, pos.quote)
                 ok = await self._close_position(session, pos, account, action, price)
                 if ok:
                     closed += 1
+                    logger.info(f"✅ {pos.symbol}: Closed successfully ({action})")
             except Exception as e:
-                logger.warning(f"Real exit error for {pos.symbol}: {e}")
+                logger.warning(f"❌ Real exit error for {pos.symbol}: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+        
+        logger.info(f"📝 Real exit cycle done: {closed} positions closed")
         return closed
 
     def _decide_exit(self, pos, price: float) -> Optional[str]:
