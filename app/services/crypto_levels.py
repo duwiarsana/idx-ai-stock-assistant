@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 
 # Multiples used to derive take-profit / stop-loss from ATR.
 # Optimised for better reward:risk with realistic SL (wider to avoid noise).
-TP1_ATR_MULT = 1.5
-TP2_ATR_MULT = 3.0
+# TP1 increased to 2.5×ATR to ensure profit covers trading fees (~0.2%).
+TP1_ATR_MULT = 2.5
+TP2_ATR_MULT = 4.0
 SL_ATR_MULT = 1.5
 
 
@@ -86,24 +87,44 @@ def compute_price_levels(
 
     if above_high and high is not None:
         # Breakout / above resistance — ride the trend.
-        levels.take_profit_1 = price + tp1_mult * atr
-        levels.take_profit_2 = price + tp2_mult * atr
-        levels.stop_loss = price - sl_mult * atr
+        tp1_price = price + tp1_mult * atr
+        tp2_price = price + tp2_mult * atr
+        sl_price = price - sl_mult * atr
+        
+        # Ensure TP1 is at least 2% above entry to cover trading fees (~0.2%)
+        min_tp1 = price * 1.02
+        if tp1_price < min_tp1:
+            tp1_price = min_tp1
+            levels.tp1_note = f"TP1 = min(2%, {tp1_mult}×ATR) untuk cover fee"
+        
+        levels.take_profit_1 = tp1_price
+        levels.take_profit_2 = tp2_price
+        levels.stop_loss = sl_price
         levels.entry_note = "Breakout — entry di harga pasar"
-        levels.tp1_note = f"TP1 = harga + {tp1_mult}×ATR (level 1)"
         levels.tp2_note = f"TP2 = harga + {tp2_mult}×ATR (level 2)"
         levels.sl_note = f"SL = harga - {sl_mult}×ATR (breakout gagal)"
     else:
         # Range — buy near support / EMA pullback, target the resistance high.
         if high is not None:
-            levels.take_profit_1 = high
-            levels.tp1_note = "TP1 = resistance terdekat (recent high)"
+            tp1_price = high
+            # Ensure TP1 is at least 2% above entry to cover trading fees
+            min_tp1 = price * 1.02
+            if tp1_price < min_tp1:
+                tp1_price = min_tp1
+                levels.tp1_note = f"TP1 = max(resistance, 2%) untuk cover fee"
+            levels.take_profit_1 = tp1_price
+            levels.tp1_note = levels.tp1_note if hasattr(levels, 'tp1_note') else "TP1 = resistance terdekat (min 2%)"
         else:
-            levels.take_profit_1 = price + tp1_mult * atr
-            levels.tp1_note = "TP1 = harga + 1×ATR"
+            tp1_price = price + tp1_mult * atr
+            min_tp1 = price * 1.02
+            if tp1_price < min_tp1:
+                tp1_price = min_tp1
+                levels.tp1_note = f"TP1 = min(2%, {tp1_mult}×ATR) untuk cover fee"
+            levels.take_profit_1 = tp1_price
+            levels.tp1_note = levels.tp1_note if hasattr(levels, 'tp1_note') else f"TP1 = harga + {tp1_mult}×ATR"
 
         levels.take_profit_2 = (high or price) + tp2_mult * atr
-        levels.tp2_note = "TP2 = +2×ATR di atas resistance"
+        levels.tp2_note = f"TP2 = +{tp2_mult}×ATR di atas resistance"
 
         if low is not None:
             levels.stop_loss = min(low, (price - sl_mult * atr))
