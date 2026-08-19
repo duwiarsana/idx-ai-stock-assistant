@@ -583,13 +583,20 @@ class RealTrader:
         )
         account = result.scalar_one_or_none()
         if account is None:
+            # For REAL mode, use actual exchange balance instead of paper default
+            real_balance = await self._real_balance(quote) or 0.0
             account = CryptoPaperAccount(
                 quote_asset=quote,
-                initial_balance=settings.crypto_paper_initial_balance,
-                cash_balance=0.0,
+                initial_balance=real_balance,
+                cash_balance=real_balance,
             )
             session.add(account)
             await session.flush()
+        else:
+            # Sync cash_balance with actual exchange balance on each access
+            real_balance = await self._real_balance(quote)
+            if real_balance is not None:
+                account.cash_balance = real_balance
         return account
 
     @staticmethod
