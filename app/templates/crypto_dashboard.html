@@ -30,6 +30,7 @@
                     <div class="flex items-center space-x-2">
                         <div class="w-3 h-3 bg-green-400 rounded-full pulse"></div>
                         <span class="text-sm">Live</span>
+                        <span class="text-xs text-gray-400" id="lastUpdate">-</span>
                     </div>
                     <button onclick="refreshData()" class="mt-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition">
                         🔄 Refresh
@@ -199,6 +200,10 @@
             document.getElementById('loading').classList.add('hidden');
             document.getElementById('dashboard').classList.remove('hidden');
             
+            // Update last update time
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent = 'Updated: ' + now.toLocaleTimeString('id-ID');
+            
             // Calculate stats
             const openPositions = positions.open_positions || [];
             const closedPositions = positions.closed_positions || [];
@@ -311,8 +316,22 @@
         // Initial load
         fetchData();
         
-        // Auto-refresh every 30 seconds
-        setInterval(fetchData, 30000);
+        // Auto-refresh every 30 seconds with visual feedback
+        let refreshInterval = setInterval(() => {
+            console.log('Auto-refreshing...');
+            fetchData().then(() => {
+                // Show refresh indicator
+                const btn = document.querySelector('button[onclick="refreshData()"]');
+                if (btn) {
+                    btn.innerHTML = '✓ Updated';
+                    setTimeout(() => {
+                        btn.innerHTML = '🔄 Refresh';
+                    }, 2000);
+                }
+            }).catch(err => {
+                console.error('Auto-refresh error:', err);
+            });
+        }, 30000);
     </script>
 </body>
 </html>
