@@ -444,35 +444,44 @@ async def crypto_real_tp_sl_check():
 
 def create_scheduler() -> AsyncIOScheduler:
     """Create and configure the job scheduler."""
+    print("🚀🚀🚀 DEBUG: create_scheduler() STARTED")
     scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
 
     # Update popular stocks every 30 min during market hours (Mon-Fri, 09:00-16:00 WIB)
-    scheduler.add_job(
-        update_popular_stocks,
-        CronTrigger(
-            day_of_week="mon-fri",
-            hour="9-15",
-            minute="*/30",
-            timezone="Asia/Jakarta",
-        ),
-        id="update_popular_stocks",
-        name="Update Popular Stocks",
-        replace_existing=True,
-    )
+    try:
+        scheduler.add_job(
+            update_popular_stocks,
+            CronTrigger(
+                day_of_week="mon-fri",
+                hour="9-15",
+                minute="*/30",
+                timezone="Asia/Jakarta",
+            ),
+            id="update_popular_stocks",
+            name="Update Popular Stocks",
+            replace_existing=True,
+        )
+        print("✅ update_popular_stocks scheduled")
+    except Exception as e:
+        print(f"❌ ERROR scheduling update_popular_stocks: {e}")
 
     # Daily scoring at 16:30 WIB (after market close)
-    scheduler.add_job(
-        daily_scoring_job,
-        CronTrigger(
-            day_of_week="mon-fri",
-            hour=16,
-            minute=30,
-            timezone="Asia/Jakarta",
-        ),
-        id="daily_scoring",
-        name="Daily Stock Scoring",
-        replace_existing=True,
-    )
+    try:
+        scheduler.add_job(
+            daily_scoring_job,
+            CronTrigger(
+                day_of_week="mon-fri",
+                hour=16,
+                minute=30,
+                timezone="Asia/Jakarta",
+            ),
+            id="daily_scoring",
+            name="Daily Stock Scoring",
+            replace_existing=True,
+        )
+        print("✅ daily_scoring scheduled")
+    except Exception as e:
+        print(f"❌ ERROR scheduling daily_scoring: {e}")
 
     # Intraday scanner every hour during market hours (Mon-Fri, 09:00-15:00 WIB)
     scheduler.add_job(
