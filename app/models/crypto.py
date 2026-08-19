@@ -86,6 +86,10 @@ class CryptoPaperPosition(Base, TimestampMixin):
     entry_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     entry_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    # Trailing stop state (persisted to survive restarts)
+    highest_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    atr_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     exit_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # TP1 / TP2 / SL / MANUAL
     realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

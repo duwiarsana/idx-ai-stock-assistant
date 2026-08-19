@@ -122,10 +122,10 @@ class PaperTrader:
                 if price is None:
                     continue
 
-                # Track highest price for trailing stop
-                highest = getattr(pos, '_highest_price', pos.entry_price)
+                # Track highest price for trailing stop (persisted to DB)
+                highest = pos.highest_price or pos.entry_price
                 if price > highest:
-                    pos._highest_price = price  # type: ignore
+                    pos.highest_price = price
 
                 action = self._decide_exit(pos, price)
                 if action is None:
@@ -154,13 +154,13 @@ class PaperTrader:
         # Calculate trailing stop: max of original SL or a percentage below
         # the highest price seen since entry (capped at breakeven initially).
         # This prevents exit during normal pullbacks but locks in profits.
-        highest_since_entry = getattr(pos, '_highest_price', entry_price)
+        highest_since_entry = pos.highest_price or entry_price
         if price > highest_since_entry:
             highest_since_entry = price
-            pos._highest_price = price  # type: ignore
+            pos.highest_price = price
         
         # Trailing distance: 1.2×ATR or 2% of entry, whichever is larger
-        atr = getattr(pos, '_atr', entry_price * 0.02)  # fallback to 2%
+        atr = pos.atr_value or (entry_price * 0.02)  # fallback to 2%
         trailing_distance = max(atr * 1.2, entry_price * 0.02)
         
         # Trailing stop price (never below original SL)
@@ -429,10 +429,9 @@ class PaperTrader:
             stop_loss=sl,
             entry_score=c.get("score"),
             entry_reason=levels.get("entry_note"),
+            atr_value=levels.get("atr"),
+            highest_price=price,
         )
-        # Store ATR and highest price for trailing stop
-        pos._atr = atr  # type: ignore
-        pos._highest_price = price  # type: ignore
         session.add(pos)
         await session.flush()  # assign pos.id
 

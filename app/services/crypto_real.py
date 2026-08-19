@@ -115,6 +115,11 @@ class RealTrader:
                     logger.warning(f"⚠️ No price for {pos.symbol}, skipping")
                     continue
                 
+                # Track highest price for trailing stop (persisted to DB)
+                highest = pos.highest_price or pos.entry_price
+                if price > highest:
+                    pos.highest_price = price
+                
                 action = self._decide_exit(pos, price)
                 
                 if action is None:
@@ -161,6 +166,11 @@ class RealTrader:
                 if price is None or price == 0:
                     continue
                 
+                # Track highest price for trailing stop (persisted to DB)
+                highest = pos.highest_price or pos.entry_price
+                if price > highest:
+                    pos.highest_price = price
+                
                 action = self._decide_exit(pos, price)
                 
                 if action is not None:
@@ -183,7 +193,25 @@ class RealTrader:
         sl = pos.stop_loss
         tp1 = pos.take_profit_1
         tp2 = pos.take_profit_2
-        if sl is not None and price <= sl:
+        entry_price = pos.entry_price or price
+        
+        # Calculate trailing stop: max of original SL or a percentage below
+        # the highest price seen since entry (capped at breakeven initially).
+        highest_since_entry = pos.highest_price or entry_price
+        if price > highest_since_entry:
+            highest_since_entry = price
+            pos.highest_price = price
+        
+        # Trailing distance: 1.2×ATR or 2% of entry, whichever is larger
+        atr = pos.atr_value or (entry_price * 0.02)  # fallback to 2%
+        trailing_distance = max(atr * 1.2, entry_price * 0.02)
+        
+        # Trailing stop price (never below original SL)
+        trailing_stop = highest_since_entry - trailing_distance
+        effective_sl = max(sl or trailing_stop, trailing_stop)
+        
+        # Exit checks in priority order: SL first (including trailing), then TP
+        if price <= effective_sl:
             return EXIT_SL
         if tp2 is not None and price >= tp2:
             return EXIT_TP2
@@ -500,6 +528,8 @@ class RealTrader:
             stop_loss=levels.get("stop_loss"),
             entry_score=c.get("score"),
             entry_reason=levels.get("entry_note"),
+            atr_value=levels.get("atr"),
+            highest_price=exec_price,
         )
         session.add(pos)
         await session.flush()

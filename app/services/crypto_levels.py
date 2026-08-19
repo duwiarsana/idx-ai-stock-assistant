@@ -28,6 +28,7 @@ class PriceLevels:
     take_profit_2: Optional[float] = None
     stop_loss: Optional[float] = None
     risk_reward: Optional[float] = None
+    atr: Optional[float] = None
     entry_note: str = ""
     tp1_note: str = ""
     tp2_note: str = ""
@@ -144,5 +145,8 @@ def compute_price_levels(
         risk = levels.entry - levels.stop_loss
         reward = levels.take_profit_1 - levels.entry
         levels.risk_reward = round(reward / risk, 2) if risk > 0 else None
+    
+    # Store ATR for trailing stop calculation
+    levels.atr = atr
 
     return levels
