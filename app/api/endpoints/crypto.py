@@ -1,5 +1,6 @@
 """Crypto scanner API endpoints — status, latest candidates, alerts, config."""
 
+import asyncio
 import logging
 import time
 
@@ -16,7 +17,7 @@ settings = get_settings()
 
 # Global price cache for dashboard API
 _PRICE_CACHE: dict[str, tuple[float, float]] = {}
-_PRICE_CACHE_TTL = 30.0  # 30 seconds (reduce API calls)
+_PRICE_CACHE_TTL = 60.0  # 60 seconds (longer TTL to reduce API calls)
 
 
 @router.get("/scanner/status")
@@ -109,22 +110,28 @@ async def crypto_positions_summary():
                 return cached_price
         
         try:
-            base = symbol.replace("_USDT", "").upper()
-            # Use Binance public API (more reliable, no rate limit for public data)
+            base = symbol.replace("_USDT", "").lower()
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    f"https://api.binance.com/api/v3/ticker/24hr?symbol={base}USDT"
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    price = float(data.get("lastPrice", 0))
-                    if price > 0:
-                        _PRICE_CACHE[symbol] = (price, now)
-                        return price
-                elif response.status_code == 429:
-                    logger.warning(f"Rate limited for {symbol}, using stale cache if available")
-                    if symbol in _PRICE_CACHE:
-                        return _PRICE_CACHE[symbol][0]
+                # Retry with backoff for rate limiting
+                for attempt in range(3):
+                    try:
+                        response = await client.get(
+                            f"https://www.tokocrypto.site/api/v3/ticker/24hr?symbol={base.upper()}USDT"
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            price = float(data.get("lastPrice", 0))
+                            if price > 0:
+                                _PRICE_CACHE[symbol] = (price, now)
+                                return price
+                        elif response.status_code == 429:
+                            if attempt < 2:
+                                await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s
+                                continue
+                    except httpx.TimeoutException:
+                        if attempt < 2:
+                            await asyncio.sleep(1)
+                            continue
         except Exception as e:
             logger.warning(f"Failed to fetch price for {symbol}: {e}")
         
