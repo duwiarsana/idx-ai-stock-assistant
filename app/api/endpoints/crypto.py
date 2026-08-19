@@ -111,13 +111,15 @@ async def crypto_positions_summary():
         closed_positions = result.scalars().all()
         
         # Performance stats by mode
+        from sqlalchemy import case
+        
         stats_result = await session.execute(
             select(
                 CryptoPaperPosition.mode,
                 func.count().label("total"),
-                func.sum(func.case((CryptoPaperPosition.status == "OPEN", 1), else_=0)).label("open_count"),
-                func.sum(func.case((CryptoPaperPosition.realized_pnl > 0, 1), else_=0)).label("wins"),
-                func.sum(func.case((CryptoPaperPosition.realized_pnl < 0, 1), else_=0)).label("losses"),
+                func.sum(case((CryptoPaperPosition.status == "OPEN", 1), else_=0)).label("open_count"),
+                func.sum(case((CryptoPaperPosition.realized_pnl > 0, 1), else_=0)).label("wins"),
+                func.sum(case((CryptoPaperPosition.realized_pnl < 0, 1), else_=0)).label("losses"),
                 func.sum(CryptoPaperPosition.realized_pnl).label("total_pnl"),
                 func.avg(CryptoPaperPosition.realized_pnl).label("avg_pnl"),
             )
