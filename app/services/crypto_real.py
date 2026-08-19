@@ -171,7 +171,8 @@ class RealTrader:
                 logger.warning(f"⚡ {pos.symbol}: Quick exit error: {e}")
         
         if closed > 0:
-            logger.info(f"⚡ Quick TP/SL check: {closed} positions closed")
+            await session.commit()
+            logger.info(f"⚡ Quick TP/SL check: {closed} positions closed and committed")
         
         return closed
 
