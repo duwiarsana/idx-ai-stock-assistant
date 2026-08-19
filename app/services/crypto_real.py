@@ -50,7 +50,7 @@ class RealTrader:
         self.client = TokoCryptoTradeClient()
         # Price cache to avoid rate limiting: {symbol: (price, timestamp)}
         self._price_cache: dict[str, tuple[float, float]] = {}
-        self._cache_ttl = 10.0  # 10 seconds TTL
+        self._cache_ttl = 15.0  # 15 seconds TTL
         self.state = {
             "enabled": settings.crypto_real_trading_enabled,
             "last_cycle_at": None,
