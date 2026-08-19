@@ -346,6 +346,12 @@ class RealTrader:
         for c in sorted(candidates, key=lambda x: x.get("score", 0), reverse=True):
             if not self._passes_entry_gate(c):
                 continue
+            
+            # Check SL cooldown
+            symbol = c.get("symbol")
+            if await self._in_sl_cooldown(session, symbol):
+                continue
+            
             symbol = c.get("symbol")
             if not symbol or symbol in open_symbols:
                 continue
@@ -401,25 +407,41 @@ class RealTrader:
 
         s1h = (c.get("tf_summaries") or {}).get("1h") or {}
 
-        if settings.crypto_paper_entry_require_uptrend:
+        # Use dedicated real trading settings (stricter than paper)
+        if settings.crypto_real_entry_require_uptrend:
             if s1h.get("trend") != "bullish":
                 return False
             if s1h.get("macd_state") != "bullish":
                 return False
 
-        if settings.crypto_paper_entry_require_breakout:
+        if settings.crypto_real_entry_require_breakout:
             if not s1h.get("at_high"):
                 return False
 
-        if settings.crypto_paper_entry_require_uptrend:
+        if settings.crypto_real_entry_require_uptrend:
             price = s1h.get("price")
             ema20 = s1h.get("ema20")
             if ema20 and price:
-                max_above = ema20 * (1 + settings.crypto_paper_entry_pullback_max_pct / 100.0)
+                max_above = ema20 * (1 + settings.crypto_real_entry_pullback_max_pct / 100.0)
                 if price > max_above:
                     return False
                 if s1h.get("at_high"):
                     return False
+        
+        # Check risk/reward ratio
+        levels = c.get("price_levels") or {}
+        risk_reward = levels.get("risk_reward")
+        if risk_reward is not None and risk_reward < settings.crypto_real_entry_min_risk_reward:
+            return False
+        
+        # Check ATR% (avoid high volatility)
+        atr = s1h.get("atr")
+        price = s1h.get("price")
+        if atr and price and price > 0:
+            atr_pct = (atr / price) * 100
+            if atr_pct > settings.crypto_real_entry_max_atr_pct:
+                return False
+        
         return True
 
     async def _drawdown_ok(self, session) -> bool:
@@ -567,6 +589,29 @@ class RealTrader:
     def _round_down_to_step(value: float, step: float) -> float:
         from app.data.tokocrypto_trade_client import TokoCryptoTradeClient
         return TokoCryptoTradeClient.round_down_to_step(value, step)
+
+    async def _in_sl_cooldown(self, session, symbol: str) -> bool:
+        """Check if symbol is in SL cooldown period."""
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import select
+        from app.models.crypto import CryptoPaperPosition
+        
+        cooldown_minutes = settings.crypto_real_sl_cooldown_minutes
+        if cooldown_minutes <= 0:
+            return False
+        
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)
+        
+        result = await session.execute(
+            select(CryptoPaperPosition.closed_at).where(
+                CryptoPaperPosition.symbol == symbol,
+                CryptoPaperPosition.mode == "REAL",
+                CryptoPaperPosition.exit_reason == "SL",
+                CryptoPaperPosition.closed_at >= cutoff,
+            ).order_by(CryptoPaperPosition.closed_at.desc()).limit(1)
+        )
+        row = result.first()
+        return row is not None
 
     async def _real_balance(self, quote: str) -> Optional[float]:
         try:

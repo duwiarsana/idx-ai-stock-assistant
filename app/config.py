@@ -172,6 +172,14 @@ class Settings(BaseSettings):
     crypto_real_max_drawdown: float = 50.0
     # Notify Telegram on every real fill.
     crypto_real_notify: bool = True
+    
+    # Real trading entry gate (stricter than paper)
+    crypto_real_entry_require_uptrend: bool = True
+    crypto_real_entry_require_breakout: bool = False
+    crypto_real_entry_pullback_max_pct: float = 3.0  # tighter than paper (5%)
+    crypto_real_entry_min_risk_reward: float = 1.5  # minimum R:R ratio
+    crypto_real_entry_max_atr_pct: float = 5.0  # max ATR% to avoid high volatility
+    crypto_real_sl_cooldown_minutes: int = 180  # 3 hours cooldown after SL
 
     # ── MQTT (ESP32 sound alerts) ─────────────────────
     mqtt_enabled: bool = False
