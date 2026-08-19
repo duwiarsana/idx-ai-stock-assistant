@@ -109,10 +109,11 @@ async def crypto_positions_summary():
                 return cached_price
         
         try:
-            base = symbol.replace("_USDT", "").lower()
+            base = symbol.replace("_USDT", "").upper()
+            # Use Binance public API (more reliable, no rate limit for public data)
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
-                    f"https://www.tokocrypto.site/api/v3/ticker/24hr?symbol={base.upper()}USDT"
+                    f"https://api.binance.com/api/v3/ticker/24hr?symbol={base}USDT"
                 )
                 if response.status_code == 200:
                     data = response.json()
@@ -122,7 +123,6 @@ async def crypto_positions_summary():
                         return price
                 elif response.status_code == 429:
                     logger.warning(f"Rate limited for {symbol}, using stale cache if available")
-                    # Return stale cache even if expired
                     if symbol in _PRICE_CACHE:
                         return _PRICE_CACHE[symbol][0]
         except Exception as e:
