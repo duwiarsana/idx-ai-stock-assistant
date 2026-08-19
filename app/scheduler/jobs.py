@@ -554,14 +554,14 @@ def create_scheduler() -> AsyncIOScheduler:
             scheduler.add_job(
                 crypto_real_tp_sl_check,
                 IntervalTrigger(
-                    seconds=30,
+                    seconds=5,
                     timezone="Asia/Jakarta",
                 ),
                 id="crypto_real_tp_sl_check",
                 name="Crypto Real TP/SL Quick Check",
                 replace_existing=True,
             )
-            logger.info("✅ Crypto real TP/SL quick check scheduled every 30 seconds")
+            logger.info("✅ Crypto real TP/SL quick check scheduled every 5 seconds")
             print("✅✅✅ Crypto real TP/SL check SCHEDULED", flush=True)
             
             # Verify job was added
