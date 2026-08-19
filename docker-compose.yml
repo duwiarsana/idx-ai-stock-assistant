@@ -12,6 +12,11 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      # Inside the compose network Redis is reachable at the service name,
+      # not "localhost" (which would point at the container itself).
+      REDIS_HOST: redis
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,6 +40,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      REDIS_HOST: redis
+      REDIS_URL: redis://redis:6379/0
+    extra_hosts:
+      # Let containers reach services on the host VPS (Mosquitto MQTT broker).
+      - "host.docker.internal:host-gateway"
     depends_on:
       - app
       - postgres

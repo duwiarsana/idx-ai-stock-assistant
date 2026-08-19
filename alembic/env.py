@@ -10,6 +10,13 @@ from app.models.user import User
 from app.models.stock import Stock, StockPrice, StockScore
 from app.models.watchlist import Watchlist
 from app.models.analysis import AnalysisHistory
+from app.models.crypto import (
+    CryptoScan,
+    CryptoAlert,
+    CryptoPaperAccount,
+    CryptoPaperPosition,
+    CryptoPaperTrade,
+)
 
 config = context.config
 if config.config_file_name is not None:

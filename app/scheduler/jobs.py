@@ -408,6 +408,20 @@ async def daily_cleanup():
     logger.info("✅ Daily cleanup complete")
 
 
+async def crypto_scan_job():
+    """Run the Tokocrypto momentum scanner (interval-based)."""
+    if not settings.crypto_scanner_enabled:
+        logger.info("⏭️ Crypto scanner disabled (CRYPTO_SCANNER_ENABLED=false), skipping job")
+        return
+    try:
+        from app.services.crypto_scanner import crypto_scanner
+        summary = await crypto_scanner.run_scan()
+        if summary.get("status") != "ok":
+            logger.error(f"Crypto scan job failed: {summary}")
+    except Exception as e:
+        logger.exception(f"Crypto scan job raised: {e}")
+
+
 def create_scheduler() -> AsyncIOScheduler:
     """Create and configure the job scheduler."""
     scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
@@ -485,5 +499,20 @@ def create_scheduler() -> AsyncIOScheduler:
         name="Daily Cleanup",
         replace_existing=True,
     )
+
+    # Crypto scanner (Tokocrypto) — interval based, enabled via config
+    if settings.crypto_scanner_enabled:
+        from apscheduler.triggers.interval import IntervalTrigger
+        scheduler.add_job(
+            crypto_scan_job,
+            IntervalTrigger(
+                minutes=max(1, settings.crypto_scan_interval_minutes),
+                timezone="Asia/Jakarta",
+            ),
+            id="crypto_scanner",
+            name="Crypto Scanner (Tokocrypto)",
+            replace_existing=True,
+        )
+        logger.info(f"Crypto scanner scheduled every {settings.crypto_scan_interval_minutes} minutes")
 
     return scheduler

@@ -16,6 +16,7 @@ Saya adalah asisten analisis saham Indonesia (IDX) berbasis AI. Saya dapat memba
 
 📊 `/stock BBCA` — Cek harga saham
 🔍 `/analyze BBCA` — Analisis AI lengkap
+🪙 `/crypto` — Scanner crypto Tokocrypto
 ❓ `/help` — Tampilkan bantuan
 
 💡 **Tips:** Anda juga bisa langsung ketik kode saham (contoh: `BBCA`)
@@ -28,18 +29,24 @@ HELP_MESSAGE = """
 📖 **Panduan IDX AI Stock Assistant**
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🔹 **Cek Harga Saham**
-   `/stock BBCA` atau `/s BBCA`
-   Menampilkan harga terkini, perubahan, dan volume.
+📋 **Semua Perintah:**
 
-🔹 **Analisis AI**
-   `/analyze BBCA` atau `/a BBCA`
-   Analisis lengkap dengan indikator teknikal,
-   tren, dan risiko menggunakan AI.
+/start — Mulai & sambutan
+/help — Bantuan ini
 
-🔹 **Kode Saham Langsung**
-   Ketik: `BBCA`
-   Bot akan otomatis menampilkan info harga.
+/stock BBCA — Cek harga saham
+   (alias: /s BBCA)
+
+/analyze BBCA — Analisis AI lengkap
+   (alias: /a BBCA)
+
+/crypto — Status scanner crypto Tokocrypto
+/crypto scan — Jalankan scan crypto manual
+/crypto alerts — Riwayat alert crypto
+   (opsi: /crypto scan --dry untuk simulasi)
+
+Ketik `BBCA` — Info harga otomatis
+   (tanpa perintah)
 
 ━━━━━━━━━━━━━━━━━━━━━━
 📊 **Contoh Saham Populer:**
