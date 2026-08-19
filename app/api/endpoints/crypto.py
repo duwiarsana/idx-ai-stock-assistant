@@ -118,11 +118,20 @@ async def crypto_positions_summary():
                     data = response.json()
                     price = float(data.get("lastPrice", 0))
                     if price > 0:
-                        # Cache the price globally
                         _PRICE_CACHE[symbol] = (price, now)
                         return price
+                elif response.status_code == 429:
+                    logger.warning(f"Rate limited for {symbol}, using stale cache if available")
+                    # Return stale cache even if expired
+                    if symbol in _PRICE_CACHE:
+                        return _PRICE_CACHE[symbol][0]
         except Exception as e:
             logger.warning(f"Failed to fetch price for {symbol}: {e}")
+        
+        # Fallback: return last cached price even if expired
+        if symbol in _PRICE_CACHE:
+            return _PRICE_CACHE[symbol][0]
+        
         return 0
     
     async with async_session_factory() as session:
