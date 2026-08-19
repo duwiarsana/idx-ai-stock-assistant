@@ -1,6 +1,7 @@
 """Crypto scanner API endpoints — status, latest candidates, alerts, config."""
 
 import logging
+import time
 
 from fastapi import APIRouter
 
@@ -12,6 +13,10 @@ from app.services.cache_service import cache_service
 logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+
+# Global price cache for dashboard API
+_PRICE_CACHE: dict[str, tuple[float, float]] = {}
+_PRICE_CACHE_TTL = 15.0  # 15 seconds
 
 
 @router.get("/scanner/status")
@@ -93,18 +98,14 @@ async def crypto_positions_summary():
     from app.models.crypto import CryptoPaperPosition
     import httpx
     
-    # Fetch current prices from Tokocrypto API with caching
-    _price_cache: dict[str, tuple[float, float]] = {}
-    _cache_ttl = 10.0  # 10 seconds
-    
+    # Fetch current prices from Tokocrypto API with global caching
     async def get_current_price(symbol: str) -> float:
-        import time
         now = time.time()
         
         # Check cache first
-        if symbol in _price_cache:
-            cached_price, cached_time = _price_cache[symbol]
-            if now - cached_time < _cache_ttl:
+        if symbol in _PRICE_CACHE:
+            cached_price, cached_time = _PRICE_CACHE[symbol]
+            if now - cached_time < _PRICE_CACHE_TTL:
                 return cached_price
         
         try:
@@ -117,8 +118,8 @@ async def crypto_positions_summary():
                     data = response.json()
                     price = float(data.get("lastPrice", 0))
                     if price > 0:
-                        # Cache the price
-                        _price_cache[symbol] = (price, now)
+                        # Cache the price globally
+                        _PRICE_CACHE[symbol] = (price, now)
                         return price
         except Exception as e:
             logger.warning(f"Failed to fetch price for {symbol}: {e}")
