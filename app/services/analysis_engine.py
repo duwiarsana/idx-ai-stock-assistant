@@ -50,7 +50,7 @@ INDICATOR_WEIGHTS = {
 # ── Thresholds ────────────────────────────────────────────────────────────
 MIN_CONFIRMING_INDICATORS = 3     # for STRONG signal
 CONFIRMING_THRESHOLD = 0.60       # indicator score ≥ this counts as confirming
-MIN_RISK_REWARD = 2.0             # minimum R:R for BUY recommendation
+MIN_RISK_REWARD = 1.5             # minimum R:R for BUY recommendation (lowered from 2.0)
 ATR_EXTREME_MULTIPLIER = 2.0     # ATR above median×this = extreme volatility
 LOOKBACK_SUPPORT_RESISTANCE = 20  # days for S/R detection
 

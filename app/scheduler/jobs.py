@@ -229,15 +229,15 @@ async def intraday_scanner_job():
             avg_vol = float(technicals.get("avg_volume_20d", 0))
             daily_value = avg_vol * current_price
             
-            # Liquidity filter: Avg Volume 20D * Current Price >= 1,000,000,000 IDR (1 Billion)
-            if daily_value < 1_000_000_000:
+            # Liquidity filter: Avg Volume 20D * Current Price >= 500,000,000 IDR (500 Million)
+            if daily_value < 500_000_000:
                 continue
 
             # Run analysis engine rules
             analysis = run_analysis(ticker, history)
             
-            # Signal criteria: Technical Score >= 70 and BUY signal
-            if analysis and analysis.final_score >= 70 and analysis.signal == "BUY":
+            # Signal criteria: Technical Score >= 55 and BUY signal (lowered from 70)
+            if analysis and analysis.final_score >= 55 and analysis.signal == "BUY":
                 # Fetch AI analysis text
                 ai_res = await ai_service.analyze_stock(ticker)
                 narrative = "Analisis AI tidak tersedia."
@@ -269,8 +269,8 @@ async def intraday_scanner_job():
                 )
                 logger.info(f"✅ Instantly alerted potential buy signal for {ticker}")
                 
-                # Set 24 hour cooldown (86400 seconds)
-                await cache_service.redis.setex(cooldown_key, 86400, "sent")
+                # Set 4 hour cooldown (14400 seconds) - reduced from 24h
+                await cache_service.redis.setex(cooldown_key, 14400, "sent")
                 
         except Exception as e:
             logger.error(f"Error scanning {ticker} in intraday: {e}")

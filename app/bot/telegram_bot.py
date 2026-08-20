@@ -25,6 +25,7 @@ from app.bot.handlers.start import start_handler, help_handler
 from app.bot.handlers.stock import stock_handler
 from app.bot.handlers.analyze import analyze_handler
 from app.bot.handlers.crypto import crypto_handler
+from app.bot.handlers.stocks import stocks_handler
 from app.bot.handlers.nlp import nlp_handler
 from app.bot.middleware import error_handler, rate_limit_middleware
 from app.scheduler.jobs import create_scheduler
@@ -60,6 +61,7 @@ async def post_init(application: Application) -> None:
         BotCommand("help", "Tampilkan bantuan"),
         BotCommand("stock", "Cek harga saham (contoh: /stock BBCA)"),
         BotCommand("analyze", "Analisis AI saham (contoh: /analyze BBCA)"),
+        BotCommand("stocks", "Saham potensial dari scanner IDX"),
         BotCommand("crypto", "Scanner crypto Tokocrypto"),
     ]
     await application.bot.set_my_commands(commands)
@@ -95,6 +97,8 @@ def create_bot() -> Application:
     app.add_handler(CommandHandler("analyze", analyze_handler))
     app.add_handler(CommandHandler("a", analyze_handler))  # shortcut
     app.add_handler(CommandHandler("crypto", crypto_handler))
+    app.add_handler(CommandHandler("stocks", stocks_handler))  # IDX stock scanner
+    app.add_handler(CommandHandler("saham", stocks_handler))  # shortcut
 
     # Debug: log every incoming update (group -1 runs before all handlers)
     app.add_handler(MessageHandler(filters.ALL, log_all_updates), group=-1)
