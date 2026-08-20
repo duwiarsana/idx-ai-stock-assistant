@@ -349,6 +349,17 @@ class PaperTrader:
 
         s1h = (c.get("tf_summaries") or {}).get("1h") or {}
 
+        # Volume gate: require above-average volume (filters noise)
+        rv_1h = s1h.get("relative_volume")
+        if rv_1h is None or rv_1h < 1.2:
+            return False
+
+        # Bear market filter: reject if 24h trend is strongly negative
+        ticker = c.get("ticker") or {}
+        price_change_24h = float(ticker.get("priceChangePercent", 0) or 0)
+        if price_change_24h < -5:
+            return False
+
         # Uptrend filter: buy only coins in a confirmed 1h uptrend
         # (EMA9 > EMA20 > EMA50 aligned + MACD bullish).
         if settings.crypto_paper_entry_require_uptrend:
@@ -375,12 +386,10 @@ class PaperTrader:
                 if s1h.get("at_high"):
                     return False  # buying the top of a breakout spike
 
-        # AI quality filter: reject candidates the AI flagged as NEUTRAL / AVOID.
-        # The AI is not a single point of failure — if no verdict is present we
-        # keep the candidate (the deterministic gate already passed).
+        # AI quality filter: ONLY accept STRONG_WATCH (stricter for higher win rate)
         if settings.crypto_paper_ai_filter_enabled:
             verdict = ((c.get("ai_verdict") or {}).get("verdict") or "").upper()
-            if verdict and verdict not in ("STRONG_WATCH", "WATCH"):
+            if verdict and verdict != "STRONG_WATCH":
                 return False
 
         return True

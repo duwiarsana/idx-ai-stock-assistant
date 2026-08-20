@@ -14,11 +14,11 @@ from app.services.crypto_indicators import recent_high, recent_low, candles_to_c
 logger = logging.getLogger(__name__)
 
 # Multiples used to derive take-profit / stop-loss from ATR.
-# Optimised for better reward:risk with realistic SL (wider to avoid noise).
-# TP1 increased to 2.5×ATR to ensure profit covers trading fees (~0.2%).
+# Optimised for better win rate: wider SL to avoid premature stop-outs.
+# TP1 at 2.5×ATR ensures profit covers trading fees (~0.2%).
 TP1_ATR_MULT = 2.5
 TP2_ATR_MULT = 4.0
-SL_ATR_MULT = 1.5
+SL_ATR_MULT = 2.0  # was 1.5 → wider SL = fewer premature stops = higher win rate
 
 
 @dataclass

@@ -407,6 +407,17 @@ class RealTrader:
 
         s1h = (c.get("tf_summaries") or {}).get("1h") or {}
 
+        # Volume gate: require above-average volume (filters noise)
+        rv_1h = s1h.get("relative_volume")
+        if rv_1h is None or rv_1h < 1.2:
+            return False
+
+        # Bear market filter: reject if 24h trend is strongly negative
+        ticker = c.get("ticker") or {}
+        price_change_24h = float(ticker.get("priceChangePercent", 0) or 0)
+        if price_change_24h < -5:
+            return False
+
         # Use dedicated real trading settings (stricter than paper)
         if settings.crypto_real_entry_require_uptrend:
             if s1h.get("trend") != "bullish":
@@ -441,6 +452,11 @@ class RealTrader:
             atr_pct = (atr / price) * 100
             if atr_pct > settings.crypto_real_entry_max_atr_pct:
                 return False
+        
+        # AI quality filter: ONLY accept STRONG_WATCH (stricter for higher win rate)
+        verdict = ((c.get("ai_verdict") or {}).get("verdict") or "").upper()
+        if verdict and verdict != "STRONG_WATCH":
+            return False
         
         return True
 

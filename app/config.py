@@ -110,10 +110,11 @@ class Settings(BaseSettings):
     crypto_max_retries: int = 3
 
     # Scoring weights (must sum to ~1.0 across positive factors)
-    crypto_weight_trend: float = 0.25
-    crypto_weight_momentum: float = 0.25
+    # Trend is king: higher weight = only strong trend setups score well
+    crypto_weight_trend: float = 0.35
+    crypto_weight_momentum: float = 0.20
     crypto_weight_volume: float = 0.25
-    crypto_weight_breakout: float = 0.25
+    crypto_weight_breakout: float = 0.20
 
     # ── Crypto Paper Trading ─────────────────────────
     crypto_paper_trading_enabled: bool = True
@@ -132,7 +133,7 @@ class Settings(BaseSettings):
     # Require a 1h uptrend (EMA9>EMA20>EMA50 + MACD bullish) before entering.
     crypto_paper_entry_require_uptrend: bool = True
     # Max % above EMA20 for a "pullback entry" (buy the dip, not the top).
-    crypto_paper_entry_pullback_max_pct: float = 5.0
+    crypto_paper_entry_pullback_max_pct: float = 8.0  # was 5.0 → wider to catch more valid setups
     # % of the position sold when TP1 is reached (rest at TP2).
     crypto_paper_sell_pct_at_tp1: float = 50.0
     # Move stop-loss to breakeven after TP1 is filled.
@@ -176,7 +177,7 @@ class Settings(BaseSettings):
     # Real trading entry gate (stricter than paper)
     crypto_real_entry_require_uptrend: bool = True
     crypto_real_entry_require_breakout: bool = False
-    crypto_real_entry_pullback_max_pct: float = 3.0  # tighter than paper (5%)
+    crypto_real_entry_pullback_max_pct: float = 8.0  # wider than paper (was 3%) to catch more valid setups
     crypto_real_entry_min_risk_reward: float = 1.5  # minimum R:R ratio
     crypto_real_entry_max_atr_pct: float = 5.0  # max ATR% to avoid high volatility
     crypto_real_sl_cooldown_minutes: int = 180  # 3 hours cooldown after SL
