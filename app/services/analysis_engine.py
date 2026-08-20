@@ -466,9 +466,19 @@ def analyze(ticker: str, history: list[dict]) -> Optional[AnalysisResult]:
         trend_status = "SIDEWAYS"
 
     # ── Risk / Reward ─────────────────────────────────────────────────
-
-    downside = current_price - support if support < current_price else atr
-    upside = resistance - current_price if resistance > current_price else atr
+    # Use ATR-based targets for more realistic R:R (raw S/R often too tight
+    # when stock is near 20-day high, making every stock look like a bad entry).
+    downside_atr = atr  # 1 ATR as risk
+    upside_atr = atr * 2  # 2 ATR as target (conservative)
+    downside_sr = current_price - support if support < current_price else atr
+    upside_sr = resistance - current_price if resistance > current_price else atr
+    # Blend: use ATR-based when S/R-based upside is too small (< 0.5 ATR)
+    if upside_sr < atr * 0.5:
+        upside = upside_atr
+        downside = downside_atr
+    else:
+        upside = upside_sr
+        downside = downside_sr
     rr_ratio = round(upside / downside, 2) if downside > 0 else 0.0
 
     # ── Signal determination ──────────────────────────────────────────
