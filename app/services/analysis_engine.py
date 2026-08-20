@@ -472,8 +472,10 @@ def analyze(ticker: str, history: list[dict]) -> Optional[AnalysisResult]:
     upside_atr = atr * 2  # 2 ATR as target (conservative)
     downside_sr = current_price - support if support < current_price else atr
     upside_sr = resistance - current_price if resistance > current_price else atr
-    # Blend: use ATR-based when S/R-based upside is too small (< 0.5 ATR)
-    if upside_sr < atr * 0.5:
+    # Calculate S/R-based R:R first
+    rr_sr = round(upside_sr / downside_sr, 2) if downside_sr > 0 else 0.0
+    # Use ATR-based when S/R-based R:R < 1.0 (stock near resistance with poor risk/reward)
+    if rr_sr < 1.0:
         upside = upside_atr
         downside = downside_atr
     else:
