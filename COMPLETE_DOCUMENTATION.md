@@ -1,7 +1,7 @@
 # 📊 IDX AI STOCK ASSISTANT - Complete Documentation
 
-**Version:** 1.0.0  
-**Last Updated:** 2026-08-14  
+**Version:** 2.0.0  
+**Last Updated:** 2026-08-20  
 **Status:** Production Ready ✅
 
 ---
@@ -21,6 +21,9 @@
 11. [Foreign Flow Analysis](#11-foreign-flow-analysis)
 12. [Troubleshooting](#12-troubleshooting)
 13. [FAQ](#13-faq)
+14. [**Trading Lessons Learned**](#14-trading-lessons-learned) ⚠️ **WAJIB BACA**
+15. [**IDX Stock Scanner**](#15-idx-stock-scanner) 🆕
+16. [**Crypto Trading System**](#16-crypto-trading-system) 🆕
 
 ---
 
@@ -1021,6 +1024,7 @@ docker exec -i idx-ai-postgres psql -U idx_ai_user idx_ai < backup.sql
 - `ML_FEATURES_GUIDE.md` - ML features documentation
 - `SCANNER_GUIDE.md` - Scanner usage guide
 - `TELEGRAM_ALERT_EXAMPLE.md` - Alert format examples
+- `LESSONS_LEARNED.md` ⚠️ **WAJIB BACA - Pelajaran trading untuk hindari kerugian**
 
 **Quick Commands:**
 ```bash
@@ -1036,8 +1040,227 @@ ssh root@76.13.19.250 "docker exec idx-ai-app python quick_scan.py"
 
 ---
 
-**Documentation Version:** 1.0.0  
-**Last Updated:** 2026-08-14  
+## 14. **TRADING LESSONS LEARNED** ⚠️ **WAJIB BACA SEBELUM UBAH KODE**
+
+### 14.1 Critical Bugs Found & Fixed (2026-08-20)
+
+| Bug | Dampak | Fix |
+|-----|--------|-----|
+| **Market sell slippage 3.6%** | Profit 4% jadi 0.05% | Limit order untuk TP exit |
+| **PnL calculation salah** | PnL tidak akurat | Proportional cost basis |
+| **R:R ratio selalu rendah** | Tidak ada BUY signal | ATR-based targets |
+| **Telegram format `:.2f`** | Profit tampil 0.00 | 4 decimal + persentase |
+| **Tidak ada volume filter** | Masuk pair tipis | Min 500K USDT 24h |
+| **TP1 terlalu dekat entry** | Profit tidak cover fee | Min 2% di atas entry |
+
+### 14.2 Masalah Utama: Market Order Slippage
+
+```
+POL_USDT (Real Case):
+  Entry:     0.08188
+  TP2 Level: 0.0852 (+4.06% dari entry)
+  Market Sell Fill: 0.08214 (bukan 0.0852!)
+  Actual Profit: +0.05% (bukan +4%)
+  Slippage: 3.6%
+```
+
+**Penyebab:** Tokocrypto order book tipis untuk pair kecil. Price spike ke TP level tapi market order fill di harga jauh lebih rendah.
+
+**Solusi:**
+```python
+# JANGAN: Market order (bisa slippage)
+resp = await self.client.market_sell(symbol, qty)
+
+# PAKAI: Limit order di TP level
+limit_price = tp_level * 0.998  # 0.2% below TP
+resp = await self.client.limit_sell(symbol, qty, limit_price)
+```
+
+### 14.3 R:R Ratio Calculation Mistake
+
+```python
+# JANGAN: Raw S/R (selalu rendah jika dekat resistance)
+upside = resistance - current_price  # bisa sangat kecil
+downside = current_price - support  # bisa sangat besar
+rr_ratio = upside / downside  # hasilnya 0.02-0.56
+
+# PAKAI: ATR-based (lebih realistis)
+rr_sr = (resistance - current_price) / (current_price - support)
+if rr_sr < 1.0:
+    upside = atr * 2    # 2xATR sebagai target
+    downside = atr       # 1xATR sebagai risk
+```
+
+### 14.4 PnL Calculation Mistake
+
+```python
+# JANGAN: Full invested amount
+pnl = sell_value - pos.invested  # Salah jika qty sell < qty beli
+
+# PAKAI: Proportional cost basis
+cost_basis = (qty_sell / qty_bought) * pos.invested
+pnl = sell_value - cost_basis
+```
+
+### 14.5 Checklist Sebelum Deploy
+
+- [ ] PnL calculation sudah pakai proportional cost basis?
+- [ ] TP exit sudah pakai limit order?
+- [ ] Volume filter sudah aktif (min 500K USDT)?
+- [ ] R:R ratio sudah pakai ATR-based fallback?
+- [ ] TP1 minimum 2% di atas entry?
+- [ ] Slippage guard sudah aktif?
+- [ ] Telegram notification format sudah benar?
+- [ ] Tidak ada debug print yang tertinggal?
+- [ ] Database migration sudah dijalankan?
+- [ ] Semua test passing?
+
+### 14.6 File Penting yang Sering Diubah
+
+| File | Fungsi | Yang Perlu Diperhatikan |
+|------|--------|------------------------|
+| `app/services/crypto_real.py` | Real trading engine | PnL calc, limit orders, slippage guard |
+| `app/services/analysis_engine.py` | IDX stock analysis | R:R calculation, thresholds |
+| `app/services/crypto_levels.py` | TP/SL levels | ATR multipliers, min TP% |
+| `app/scheduler/jobs.py` | Scheduled jobs | Scanner thresholds, cooldowns |
+| `app/data/tokocrypto_trade_client.py` | Exchange API | Limit orders, rate limiting |
+
+---
+
+## 15. **IDX STOCK SCANNER** 🆕
+
+### 15.1 How It Works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    IDX STOCK SCANNER                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. Scan 941 saham IDX setiap jam (market hours)           │
+│  2. Filter: Volume ≥ 1.2x avg, 24h change > -5%           │
+│  3. Analisis Technical (scoring system)                     │
+│  4. R:R calculation (ATR-based)                            │
+│  5. Jika score ≥ 55 & signal = BUY → Alert!                │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 15.2 Scoring System
+
+| Component | Weight | Description |
+|-----------|--------|-------------|
+| Trend | 35% | MA alignment, price above SMA50 |
+| Momentum | 20% | RSI, MACD, Stochastic |
+| Volume | 25% | Relative volume, volume trend |
+| Breakout | 20% | Higher highs/lows, resistance proximity |
+
+### 15.3 Entry Criteria (Real Trading)
+
+```python
+crypto_real_entry_score = 75        # Minimum score
+crypto_real_entry_require_uptrend = True
+crypto_real_entry_pullback_max_pct = 8.0
+crypto_real_entry_min_risk_reward = 1.5
+crypto_real_entry_max_atr_pct = 5.0
+```
+
+### 15.4 Telegram Commands
+
+- `/stocks` - Top scored stocks dari scan
+- `/stocks scan` - Trigger scan manual
+- `/stocks watchlist` - Daftar saham dipantau
+
+### 15.5 Scanner Thresholds
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Score threshold | 55 | Minimum score untuk BUY signal |
+| R:R minimum | 1.5 | Risk/reward ratio |
+| Liquidity filter | 500M IDR | Minimum daily value |
+| Alert cooldown | 4 hours | Antara alert yang sama |
+
+---
+
+## 16. **CRYPTO TRADING SYSTEM** 🆕
+
+### 16.1 Configuration
+
+```env
+# Real Trading
+CRYPTO_REAL_TRADING_ENABLED=true
+CRYPTO_REAL_ENTRY_SCORE=75
+CRYPTO_REAL_ALLOCATION_PERCENT=10
+CRYPTO_REAL_MAX_POSITIONS=3
+
+# Paper Trading
+CRYPTO_PAPER_TRADING_ENABLED=false
+
+# TP/SL Settings
+CRYPTO_TP1_ATR_MULT=2.5
+CRYPTO_TP2_ATR_MULT=4.0
+CRYPTO_SL_ATR_MULT=2.0
+```
+
+### 16.2 Trading Flow
+
+```
+1. Scanner picks candidates (score ≥ 75)
+2. Entry gate checks:
+   - Volume ≥ 1.2x average
+   - 24h change > -5%
+   - Uptrend confirmed (EMA20 > SMA50)
+   - R:R ≥ 1.5
+   - ATR < 5% (not too volatile)
+   - AI verdict = STRONG_WATCH
+   - 24h volume ≥ 500K USDT
+3. Execute BUY (market order)
+4. Set TP1 (2.5x ATR) and TP2 (4x ATR)
+5. Set SL (2x ATR below entry)
+6. Monitor with trailing stop
+7. Exit via:
+   - TP1/TP2 (limit order at TP level)
+   - Trailing stop (1.2x ATR or 2% of entry)
+   - SL (2x ATR below entry)
+```
+
+### 16.3 Exit Logic
+
+```python
+# Priority order:
+1. Stop Loss (including trailing)
+2. Take Profit 2 (limit order)
+3. Take Profit 1 (limit order)
+
+# Slippage Guard:
+if price dropped > 1% from TP level:
+    skip sell (wait for recovery or SL)
+
+# Trailing Stop:
+trailing_distance = max(atr * 1.2, entry_price * 0.02)
+trailing_stop = highest_price - trailing_distance
+effective_sl = max(original_sl, trailing_stop)
+```
+
+### 16.4 Position Management
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| Max positions | 3 | Concurrent open positions |
+| Allocation | 10% | Per position of balance |
+| Min order | 5 USDT | Tokocrypto minimum |
+| SL cooldown | 3 hours | After SL exit |
+| TP check | 5 seconds | Quick check interval |
+
+### 16.5 Dashboard
+
+- URL: `http://76.13.19.250:8000/crypto-dashboard`
+- API: `http://76.13.19.250:8000/api/v1/crypto/dashboard/positions`
+- Shows: Open positions, PnL, trade history
+
+---
+
+**Documentation Version:** 2.0.0  
+**Last Updated:** 2026-08-20  
 **Status:** Production Ready ✅
 
 **IDX AI Stock Assistant - AI-powered Indonesian stock analysis** 🚀
