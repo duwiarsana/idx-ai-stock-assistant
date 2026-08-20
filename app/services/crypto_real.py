@@ -744,12 +744,15 @@ class RealTrader:
 
     async def _notify_close(self, pos, action: str, exit_price: float, pnl: float, account=None) -> None:
         emoji = "✅" if pnl >= 0 else "🔻"
+        pnl_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price else 0
+        # Use 4 decimals for tiny PnL values so they don't show as 0.00
+        pnl_str = f"{pnl:+.4f}" if abs(pnl) < 1 else f"{pnl:+.2f}"
         text = (
             f"{emoji} *REAL SELL ({action})*\n\n"
             f"🔹 {pos.display or pos.symbol}\n"
             f"💵 Entry: {_fmt_price(pos.entry_price)} {pos.quote}\n"
             f"🏁 Exit: {_fmt_price(exit_price)} {pos.quote}\n"
-            f"💹 PnL: **{pnl:+.2f} {pos.quote}**\n"
+            f"💹 PnL: **{pnl_str} {pos.quote}** ({pnl_pct:+.2f}%)\n"
         )
         text += "🎉 *UNTUNG!*\n" if pnl >= 0 else "⚠️ *RUGI.*\n"
         text += await self._portfolio_summary(pos.quote)
