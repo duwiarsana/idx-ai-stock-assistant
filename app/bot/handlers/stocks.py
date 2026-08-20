@@ -15,7 +15,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.config import get_settings
-from app.services.scoring_service import get_latest_scores
+from app.services.scoring_service import scoring_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -55,7 +55,7 @@ async def stocks_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def _stocks_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show top-scored stocks from recent scans."""
     try:
-        scores = await get_latest_scores(limit=10)
+        scores = await scoring_service.get_latest_scores(limit=10)
         if not scores:
             await update.message.reply_text(
                 "📊 **IDX Stock Scanner**\n\n"
