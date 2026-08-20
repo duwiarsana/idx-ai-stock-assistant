@@ -214,8 +214,24 @@ class RealTrader:
         if price <= effective_sl:
             return EXIT_SL
         if tp2 is not None and price >= tp2:
+            # Slippage guard: if price dropped >1% from TP level, skip sell
+            # (wait for recovery or let it hit SL instead of selling into weakness)
+            slippage_pct = (tp2 - price) / tp2 * 100
+            if slippage_pct > 1.0:
+                logger.debug(
+                    f"⏳ {pos.symbol}: TP2={tp2:.6f} but price={price:.6f} "
+                    f"({slippage_pct:.2f}% below TP2) — skipping to avoid slippage"
+                )
+                return None
             return EXIT_TP2
         if tp1 is not None and price >= tp1:
+            slippage_pct = (tp1 - price) / tp1 * 100
+            if slippage_pct > 1.0:
+                logger.debug(
+                    f"⏳ {pos.symbol}: TP1={tp1:.6f} but price={price:.6f} "
+                    f"({slippage_pct:.2f}% below TP1) — skipping to avoid slippage"
+                )
+                return None
             return EXIT_TP1
         return None
 
@@ -286,8 +302,26 @@ class RealTrader:
                 return True
 
         # ── REAL SELL order ───────────────────────────────────────────
+        # For TP exits: use limit order at TP level to avoid slippage.
+        # For SL/dust exits: use market order (speed matters more than price).
         try:
-            resp = await self.client.market_sell(pos.symbol, qty_sell)
+            if action in (EXIT_TP1, EXIT_TP2):
+                # Limit sell at the TP level (slightly below to ensure fill)
+                tp_level = pos.take_profit_2 if action == EXIT_TP2 else pos.take_profit_1
+                limit_price = tp_level * 0.998 if tp_level else price  # 0.2% below TP
+                # Ensure limit price >= current price (can't sell below market)
+                limit_price = max(limit_price, price)
+                # Round to PRICE_FILTER tick size
+                rules = await self.client.get_symbol_rules(pos.symbol)
+                tick = rules.get("tick_size") or 1e-8
+                limit_price = self._round_down_to_step(limit_price, tick)
+                logger.info(
+                    f"📊 {pos.symbol}: Limit SELL at {limit_price:.6f} "
+                    f"(TP level={tp_level:.6f}, current={price:.6f})"
+                )
+                resp = await self.client.limit_sell(pos.symbol, qty_sell, limit_price)
+            else:
+                resp = await self.client.market_sell(pos.symbol, qty_sell)
             fill = self._parse_fill(resp)
         except Exception as e:
             err_str = str(e)
@@ -453,8 +487,13 @@ class RealTrader:
         if rv_1h is None or rv_1h < 1.2:
             return False
 
-        # Bear market filter: reject if 24h trend is strongly negative
+        # Liquidity gate: skip coins with low 24h quote volume (thin books = slippage)
         ticker = c.get("ticker") or {}
+        quote_volume = float(ticker.get("quoteVolume", 0) or 0)
+        if quote_volume < 500_000:  # min 500K USDT 24h volume
+            return False
+
+        # Bear market filter: reject if 24h trend is strongly negative
         price_change_24h = float(ticker.get("priceChangePercent", 0) or 0)
         if price_change_24h < -5:
             return False

@@ -38,6 +38,7 @@ TRADE_BASE = "https://www.tokocrypto.com"
 SIDE_BUY = 0
 SIDE_SELL = 1
 # type: 1 = LIMIT, 2 = MARKET
+ORDER_LIMIT = 1
 ORDER_MARKET = 2
 
 # Order status codes (see docs)
@@ -250,6 +251,38 @@ class TokoCryptoTradeClient:
                 side=SIDE_SELL,
                 type=ORDER_MARKET,
                 quantity=self.fmt_qty(quantity),
+            ),
+        )
+
+    async def limit_sell(self, symbol: str, quantity: float, price: float) -> dict:
+        """Place a limit SELL order at ``price`` for ``quantity``.
+
+        Used for TP exits to avoid market-order slippage on thin books.
+        The limit price is set slightly below the TP level to ensure fill
+        while still protecting against slippage.
+        """
+        return await self._request(
+            "POST",
+            "/open/v1/orders",
+            self._signed_params(
+                symbol=symbol.replace("_", "_"),
+                side=SIDE_SELL,
+                type=ORDER_LIMIT,
+                quantity=self.fmt_qty(quantity),
+                price=self.fmt_qty(price),
+                timeInForce="GTC",
+            ),
+        )
+
+    async def cancel_order(self, symbol: str, order_id: Any) -> dict:
+        """Cancel an open order."""
+        return await self._request(
+            "POST",
+            "/open/v1/orders",
+            self._signed_params(
+                symbol=symbol.replace("_", "_"),
+                orderId=order_id,
+                type="CANCEL",
             ),
         )
 
