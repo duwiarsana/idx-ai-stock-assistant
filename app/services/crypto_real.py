@@ -266,15 +266,52 @@ class RealTrader:
             if qty_up <= qty and qty_up * price >= min_notional:
                 qty_sell = qty_up
             else:
-                # Even the max affordable qty can't meet min_notional — sell
-                # whatever we have; some exchanges accept orders slightly below.
-                qty_sell = self._round_down_to_step(qty, step)
+                # Even the max affordable qty can't meet min_notional — this is
+                # dust. Force-close instead of attempting a doomed sell.
+                logger.warning(
+                    f"⚡ {pos.symbol}: Notional {qty_sell*price:.4f} USDT < min {min_notional}. "
+                    f"Force-closing as dust."
+                )
+                exit_price = price
+                pnl = -abs(pos.invested or 0.0)
+                pos.status = STATUS_CLOSED
+                pos.exit_price = exit_price
+                pos.exit_reason = f"{action}_DUST"
+                pos.realized_pnl = pnl
+                pos.closed_at = datetime.now(timezone.utc)
+                account.realized_pnl += pnl
+                account.total_trades += 1
+                if settings.crypto_real_notify:
+                    await self._notify_close(pos, action, exit_price, pnl, account)
+                return True
 
         # ── REAL SELL order ───────────────────────────────────────────
         try:
             resp = await self.client.market_sell(pos.symbol, qty_sell)
             fill = self._parse_fill(resp)
         except Exception as e:
+            err_str = str(e)
+            # Error 3210 = "Total order value should be more than 5 USDT"
+            # This position is dust — force-close it to stop the retry loop
+            if "3210" in err_str or "min_notional" in err_str.lower() or "more than 5 USDT" in err_str:
+                logger.warning(
+                    f"⚡ {pos.symbol}: Order value too small to sell ({qty_sell*price:.4f} USDT). "
+                    f"Force-closing as dust."
+                )
+                # Force close: record the market price as exit, accept the loss
+                exit_price = price
+                pnl = -abs(pos.invested or 0.0)
+                pos.status = STATUS_CLOSED
+                pos.exit_price = exit_price
+                pos.exit_reason = f"{action}_DUST"
+                pos.realized_pnl = pnl
+                pos.closed_at = datetime.now(timezone.utc)
+                account.realized_pnl += pnl
+                account.total_trades += 1
+                # Don't count as winning
+                if settings.crypto_real_notify:
+                    await self._notify_close(pos, action, exit_price, pnl, account)
+                return True
             # A failed SELL must not be silently swallowed — keep position OPEN
             # so the next cycle can try again. Log loudly.
             logger.error(f"REAL SELL FAILED for {pos.symbol}: {e}")
