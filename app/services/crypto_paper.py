@@ -190,7 +190,8 @@ class PaperTrader:
         }.get(action) or price
 
         proceeds = qty * exit_price
-        pnl = proceeds - (pos.invested or 0.0)
+        cost_basis = (qty / (pos.quantity or qty)) * (pos.invested or 0.0) if pos.quantity else 0
+        pnl = proceeds - cost_basis
 
         session.add(CryptoPaperTrade(
             position_id=pos.id,

@@ -320,7 +320,11 @@ class RealTrader:
 
         exit_price = fill.get("price") or price
         proceeds = qty_sell * exit_price
-        pnl = proceeds - (pos.invested or 0.0)
+        # BUG FIX: Calculate PnL based on qty_sold, not full invested amount.
+        # When qty_sell < pos.quantity (due to rounding/fees), the unsold dust
+        # stays in the wallet — it should NOT be counted as a loss.
+        cost_basis = (qty_sell / qty) * (pos.invested or 0.0) if qty else 0
+        pnl = proceeds - cost_basis
 
         session.add(CryptoPaperTrade(
             position_id=pos.id,
