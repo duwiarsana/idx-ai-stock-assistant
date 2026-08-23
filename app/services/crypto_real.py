@@ -42,6 +42,96 @@ SIDE_SELL_TP2 = "SELL_TP2"
 SIDE_SELL_SL = "SELL_SL"
 
 
+def _is_blacklisted_base(symbol: str) -> bool:
+    """True when the base asset is pegged (stablecoin/gold/wrapped-staked)
+    and must never be traded with TP/SL levels."""
+    blacklist = {
+        s.strip().upper()
+        for s in (settings.crypto_real_symbol_blacklist or "").split(",")
+        if s.strip()
+    }
+    base = (symbol or "").split("_")[0].strip().upper()
+    return base in blacklist
+
+
+def passes_entry_gate(c: dict) -> bool:
+    """Shared candidate gate used by BOTH the paper and real engines.
+
+    Running them on identical signals is what makes the parallel paper-vs-real
+    comparison meaningful: any performance gap then comes purely from live
+    execution (fees, slippage, rejections), not from different strategies.
+    """
+    symbol = c.get("symbol") or ""
+    # Pegged assets (stablecoins/gold/wrapped): flat price by design, so
+    # TP/SL levels are meaningless and fees guarantee a loss.
+    if _is_blacklisted_base(symbol):
+        logger.debug(f"🚫 {symbol}: pegged/blacklisted base asset — skipping")
+        return False
+    score = c.get("score") or 0
+    if score < settings.crypto_real_entry_score:
+        return False
+
+    s1h = (c.get("tf_summaries") or {}).get("1h") or {}
+
+    # Volume gate: require above-average volume (filters noise)
+    rv_1h = s1h.get("relative_volume")
+    if rv_1h is None or rv_1h < 1.2:
+        return False
+
+    # Liquidity gate: skip coins with low 24h quote volume (thin books = slippage)
+    ticker = c.get("ticker") or {}
+    quote_volume = float(ticker.get("quoteVolume", 0) or 0)
+    if quote_volume < 500_000:  # min 500K USDT 24h volume
+        return False
+
+    # Bear market filter: reject if 24h trend is strongly negative
+    price_change_24h = float(ticker.get("priceChangePercent", 0) or 0)
+    if price_change_24h < -5:
+        return False
+
+    # Use dedicated real trading settings (stricter than paper)
+    if settings.crypto_real_entry_require_uptrend:
+        if s1h.get("trend") != "bullish":
+            return False
+        if s1h.get("macd_state") != "bullish":
+            return False
+
+    if settings.crypto_real_entry_require_breakout:
+        if not s1h.get("at_high"):
+            return False
+
+    if settings.crypto_real_entry_require_uptrend:
+        price = s1h.get("price")
+        ema20 = s1h.get("ema20")
+        if ema20 and price:
+            max_above = ema20 * (1 + settings.crypto_real_entry_pullback_max_pct / 100.0)
+            if price > max_above:
+                return False
+            if s1h.get("at_high"):
+                return False
+
+    # Check risk/reward ratio
+    levels = c.get("price_levels") or {}
+    risk_reward = levels.get("risk_reward")
+    if risk_reward is not None and risk_reward < settings.crypto_real_entry_min_risk_reward:
+        return False
+
+    # Check ATR% (avoid high volatility)
+    atr = s1h.get("atr")
+    price = s1h.get("price")
+    if atr and price and price > 0:
+        atr_pct = (atr / price) * 100
+        if atr_pct > settings.crypto_real_entry_max_atr_pct:
+            return False
+
+    # AI quality filter: ONLY accept STRONG_WATCH (stricter for higher win rate)
+    verdict = ((c.get("ai_verdict") or {}).get("verdict") or "").upper()
+    if verdict and verdict != "STRONG_WATCH":
+        return False
+
+    return True
+
+
 class RealTrader:
     """Places real orders driven by the same candidate signals as paper."""
 
@@ -483,75 +573,7 @@ class RealTrader:
         return opened
 
     def _passes_entry_gate(self, c: dict) -> bool:
-        symbol = c.get("symbol") or ""
-        # Pegged assets (stablecoins/gold/wrapped): flat price by design, so
-        # TP/SL levels are meaningless and fees guarantee a loss.
-        if self._is_blacklisted(symbol):
-            logger.debug(f"🚫 {symbol}: pegged/blacklisted base asset — skipping")
-            return False
-        score = c.get("score") or 0
-        if score < settings.crypto_real_entry_score:
-            return False
-
-        s1h = (c.get("tf_summaries") or {}).get("1h") or {}
-
-        # Volume gate: require above-average volume (filters noise)
-        rv_1h = s1h.get("relative_volume")
-        if rv_1h is None or rv_1h < 1.2:
-            return False
-
-        # Liquidity gate: skip coins with low 24h quote volume (thin books = slippage)
-        ticker = c.get("ticker") or {}
-        quote_volume = float(ticker.get("quoteVolume", 0) or 0)
-        if quote_volume < 500_000:  # min 500K USDT 24h volume
-            return False
-
-        # Bear market filter: reject if 24h trend is strongly negative
-        price_change_24h = float(ticker.get("priceChangePercent", 0) or 0)
-        if price_change_24h < -5:
-            return False
-
-        # Use dedicated real trading settings (stricter than paper)
-        if settings.crypto_real_entry_require_uptrend:
-            if s1h.get("trend") != "bullish":
-                return False
-            if s1h.get("macd_state") != "bullish":
-                return False
-
-        if settings.crypto_real_entry_require_breakout:
-            if not s1h.get("at_high"):
-                return False
-
-        if settings.crypto_real_entry_require_uptrend:
-            price = s1h.get("price")
-            ema20 = s1h.get("ema20")
-            if ema20 and price:
-                max_above = ema20 * (1 + settings.crypto_real_entry_pullback_max_pct / 100.0)
-                if price > max_above:
-                    return False
-                if s1h.get("at_high"):
-                    return False
-        
-        # Check risk/reward ratio
-        levels = c.get("price_levels") or {}
-        risk_reward = levels.get("risk_reward")
-        if risk_reward is not None and risk_reward < settings.crypto_real_entry_min_risk_reward:
-            return False
-        
-        # Check ATR% (avoid high volatility)
-        atr = s1h.get("atr")
-        price = s1h.get("price")
-        if atr and price and price > 0:
-            atr_pct = (atr / price) * 100
-            if atr_pct > settings.crypto_real_entry_max_atr_pct:
-                return False
-        
-        # AI quality filter: ONLY accept STRONG_WATCH (stricter for higher win rate)
-        verdict = ((c.get("ai_verdict") or {}).get("verdict") or "").upper()
-        if verdict and verdict != "STRONG_WATCH":
-            return False
-        
-        return True
+        return passes_entry_gate(c)
 
     async def _drawdown_ok(self, session) -> bool:
         from sqlalchemy import select

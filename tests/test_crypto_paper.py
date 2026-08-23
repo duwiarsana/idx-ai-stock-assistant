@@ -6,7 +6,9 @@ from app.services.crypto_paper import PaperTrader, EXIT_TP1, EXIT_TP2, EXIT_SL
 from tests.crypto_fixtures import make_candles_uptrend
 
 
-def make_candidate(symbol="SUI_USDT", score=85.0, at_high=True, price=1.234, quote="USDT"):
+def make_candidate(symbol="SUI_USDT", score=85.0, at_high=False, price=1.234, quote="USDT"):
+    # NOTE: at_high defaults to False now — the shared entry gate rejects
+    # candidates buying the top of a breakout spike (chasing).
     s1h = {
         "trend": "bullish",
         "rsi": 60.0,
@@ -24,6 +26,7 @@ def make_candidate(symbol="SUI_USDT", score=85.0, at_high=True, price=1.234, quo
         "price": price,
         "score": score,
         "tf_summaries": {"5m": {}, "15m": {}, "1h": s1h},
+        "ticker": {"quoteVolume": "10000000", "priceChangePercent": "2.0"},
         "price_levels": {
             "entry": price,
             "take_profit_1": price * 1.05,
@@ -63,72 +66,72 @@ class TestEntryGate:
     def test_accepts_high_score_breakout(self, trader, monkeypatch):
         # Legacy breakout mode: uptrend/pullback gates off, breakout required.
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_require_breakout", True)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_require_uptrend", False)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_require_breakout", True)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_require_uptrend", False)
         assert trader._passes_entry_gate(make_candidate(score=85, at_high=True))
 
     def test_rejects_low_score(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
         assert not trader._passes_entry_gate(make_candidate(score=70, at_high=True))
 
     def test_rejects_no_breakout_when_required(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_require_breakout", True)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_require_breakout", True)
         assert not trader._passes_entry_gate(make_candidate(score=90, at_high=False))
 
     def test_accepts_no_breakout_when_not_required(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_require_breakout", False)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_require_breakout", False)
         assert trader._passes_entry_gate(make_candidate(score=85, at_high=False))
 
     def test_rejects_bearish_trend_when_uptrend_required(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_require_uptrend", True)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_require_uptrend", True)
         cand = make_candidate(score=90, at_high=False)
         cand["tf_summaries"]["1h"]["trend"] = "bearish"
         assert not trader._passes_entry_gate(cand)
 
     def test_rejects_neutral_macd_when_uptrend_required(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_require_uptrend", True)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_require_uptrend", True)
         cand = make_candidate(score=90, at_high=False)
         cand["tf_summaries"]["1h"]["macd_state"] = "neutral"
         assert not trader._passes_entry_gate(cand)
 
     def test_rejects_extended_price_above_ema20(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_pullback_max_pct", 3.0)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_pullback_max_pct", 3.0)
         cand = make_candidate(score=90, at_high=False)
         cand["tf_summaries"]["1h"]["ema20"] = cand["price"] * 0.9  # 11% above EMA20
         assert not trader._passes_entry_gate(cand)
 
     def test_rejects_at_high_when_pullback_strategy(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_pullback_max_pct", 3.0)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_pullback_max_pct", 3.0)
         cand = make_candidate(score=90, at_high=True)
         assert not trader._passes_entry_gate(cand)
 
     def test_accepts_healthy_pullback_in_uptrend(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_require_uptrend", True)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_pullback_max_pct", 3.0)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_require_uptrend", True)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_pullback_max_pct", 3.0)
         # price 1.5% above EMA20, not at high → healthy pullback
         cand = make_candidate(score=88, at_high=False)
         assert trader._passes_entry_gate(cand)
 
     def test_ai_filter_rejects_neutral_or_avoid(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_pullback_max_pct", 3.0)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_pullback_max_pct", 3.0)
         monkeypatch.setattr(get_settings(), "crypto_paper_ai_filter_enabled", True)
         for verdict in ("NEUTRAL", "AVOID"):
             cand = make_candidate(score=90, at_high=False)
@@ -137,27 +140,29 @@ class TestEntryGate:
 
     def test_ai_filter_accepts_watch_verdicts(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_pullback_max_pct", 3.0)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_pullback_max_pct", 3.0)
         monkeypatch.setattr(get_settings(), "crypto_paper_ai_filter_enabled", True)
         for verdict in ("STRONG_WATCH", "WATCH"):
             cand = make_candidate(score=90, at_high=False)
             cand["ai_verdict"] = {"verdict": verdict}
             assert trader._passes_entry_gate(cand), f"should accept {verdict}"
 
-    def test_ai_filter_disabled_accepts_avoid(self, trader, monkeypatch):
+    def test_ai_verdict_avoid_rejected_even_if_paper_filter_disabled(self, trader, monkeypatch):
+        # Paper now shares the REAL entry gate: a non-STRONG_WATCH verdict is
+        # always rejected there — the old paper-side ai_filter flag is unused.
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_pullback_max_pct", 3.0)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_pullback_max_pct", 3.0)
         monkeypatch.setattr(get_settings(), "crypto_paper_ai_filter_enabled", False)
         cand = make_candidate(score=90, at_high=False)
         cand["ai_verdict"] = {"verdict": "AVOID"}
-        assert trader._passes_entry_gate(cand)
+        assert not trader._passes_entry_gate(cand)
 
     def test_ai_filter_missing_verdict_is_not_blocking(self, trader, monkeypatch):
         from app.config import get_settings
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_score", 80)
-        monkeypatch.setattr(get_settings(), "crypto_paper_entry_pullback_max_pct", 3.0)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
+        monkeypatch.setattr(get_settings(), "crypto_real_entry_pullback_max_pct", 3.0)
         monkeypatch.setattr(get_settings(), "crypto_paper_ai_filter_enabled", True)
         cand = make_candidate(score=90, at_high=False)  # no ai_verdict key
         assert trader._passes_entry_gate(cand)

@@ -344,64 +344,11 @@ class PaperTrader:
         return opened
 
     def _passes_entry_gate(self, c: dict) -> bool:
-        symbol = c.get("symbol") or ""
-        # Pegged assets (stablecoins/gold/wrapped) must never be traded — flat
-        # price by design, TP/SL levels meaningless. Same list as real mode so
-        # paper stats stay clean for future ML training data.
-        from app.services.crypto_real import RealTrader
-        if RealTrader._is_blacklisted(symbol):
-            logger.debug(f"🚫 {symbol}: pegged/blacklisted base asset — skipping")
-            return False
-        score = c.get("score") or 0
-        if score < settings.crypto_paper_entry_score:
-            return False
-
-        s1h = (c.get("tf_summaries") or {}).get("1h") or {}
-
-        # Volume gate: require above-average volume (filters noise)
-        rv_1h = s1h.get("relative_volume")
-        if rv_1h is None or rv_1h < 1.2:
-            return False
-
-        # Bear market filter: reject if 24h trend is strongly negative
-        ticker = c.get("ticker") or {}
-        price_change_24h = float(ticker.get("priceChangePercent", 0) or 0)
-        if price_change_24h < -5:
-            return False
-
-        # Uptrend filter: buy only coins in a confirmed 1h uptrend
-        # (EMA9 > EMA20 > EMA50 aligned + MACD bullish).
-        if settings.crypto_paper_entry_require_uptrend:
-            if s1h.get("trend") != "bullish":
-                return False
-            if s1h.get("macd_state") != "bullish":
-                return False
-
-        # Legacy breakout gate (kept for backward compat, default off).
-        if settings.crypto_paper_entry_require_breakout:
-            if not s1h.get("at_high"):
-                return False
-
-        # Pullback gate (only in pullback/uptrend strategy): don't chase the
-        # top. Price must be within pullback_max_pct above EMA20 (a healthy
-        # pullback in the uptrend), and NOT at the recent high.
-        if settings.crypto_paper_entry_require_uptrend:
-            price = s1h.get("price")
-            ema20 = s1h.get("ema20")
-            if ema20 and price:
-                max_above = ema20 * (1 + settings.crypto_paper_entry_pullback_max_pct / 100.0)
-                if price > max_above:
-                    return False  # too extended above EMA20 → chasing
-                if s1h.get("at_high"):
-                    return False  # buying the top of a breakout spike
-
-        # AI quality filter: ONLY accept STRONG_WATCH (stricter for higher win rate)
-        if settings.crypto_paper_ai_filter_enabled:
-            verdict = ((c.get("ai_verdict") or {}).get("verdict") or "").upper()
-            if verdict and verdict != "STRONG_WATCH":
-                return False
-
-        return True
+        # SHARED gate with the real engine (crypto_real.passes_entry_gate).
+        # Paper runs the exact same signal rules as REAL so the parallel
+        # paper-vs-real comparison isolates execution quality only.
+        from app.services.crypto_real import passes_entry_gate
+        return passes_entry_gate(c)
 
     async def _open_position_count(self, session, quote: str) -> int:
         from sqlalchemy import select, func
