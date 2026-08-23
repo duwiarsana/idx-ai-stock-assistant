@@ -47,3 +47,6 @@ htmlcov/
 
 # Alembic
 alembic/versions/*.pyc
+
+# ML models & training artifacts
+data/models/
