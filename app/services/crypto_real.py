@@ -288,8 +288,13 @@ class RealTrader:
                     f"⚡ {pos.symbol}: Notional {qty_sell*price:.4f} USDT < min {min_notional}. "
                     f"Force-closing as dust."
                 )
+                # BUG FIX: book the REAL market value of the holdings as PnL.
+                # The coins stay in the wallet (convertible later via the
+                # exchange dust-sweep) — booking -invested here faked a -100%
+                # loss on every dust close even when price barely moved.
                 exit_price = price
-                pnl = -abs(pos.invested or 0.0)
+                cost_basis = (qty_sell / qty) * (pos.invested or 0.0) if qty else 0.0
+                pnl = (qty_sell * exit_price) - cost_basis
                 pos.status = STATUS_CLOSED
                 pos.exit_price = exit_price
                 pos.exit_reason = f"{action}_DUST"
@@ -298,7 +303,7 @@ class RealTrader:
                 account.realized_pnl += pnl
                 account.total_trades += 1
                 if settings.crypto_real_notify:
-                    await self._notify_close(pos, action, exit_price, pnl, account)
+                    await self._notify_close(pos, f"{action}/DUST", exit_price, pnl, account)
                 return True
 
         # ── REAL SELL order ───────────────────────────────────────────
@@ -332,9 +337,11 @@ class RealTrader:
                     f"⚡ {pos.symbol}: Order value too small to sell ({qty_sell*price:.4f} USDT). "
                     f"Force-closing as dust."
                 )
-                # Force close: record the market price as exit, accept the loss
+                # BUG FIX: same as the pre-order dust path — book the REAL
+                # market value, not -invested. The coins remain in the wallet.
                 exit_price = price
-                pnl = -abs(pos.invested or 0.0)
+                cost_basis = (qty_sell / qty) * (pos.invested or 0.0) if qty else 0.0
+                pnl = (qty_sell * exit_price) - cost_basis
                 pos.status = STATUS_CLOSED
                 pos.exit_price = exit_price
                 pos.exit_reason = f"{action}_DUST"
@@ -344,7 +351,7 @@ class RealTrader:
                 account.total_trades += 1
                 # Don't count as winning
                 if settings.crypto_real_notify:
-                    await self._notify_close(pos, action, exit_price, pnl, account)
+                    await self._notify_close(pos, f"{action}/DUST", exit_price, pnl, account)
                 return True
             # A failed SELL must not be silently swallowed — keep position OPEN
             # so the next cycle can try again. Log loudly.
@@ -476,6 +483,12 @@ class RealTrader:
         return opened
 
     def _passes_entry_gate(self, c: dict) -> bool:
+        symbol = c.get("symbol") or ""
+        # Pegged assets (stablecoins/gold/wrapped): flat price by design, so
+        # TP/SL levels are meaningless and fees guarantee a loss.
+        if self._is_blacklisted(symbol):
+            logger.debug(f"🚫 {symbol}: pegged/blacklisted base asset — skipping")
+            return False
         score = c.get("score") or 0
         if score < settings.crypto_real_entry_score:
             return False
@@ -570,11 +583,25 @@ class RealTrader:
         if allocated <= 0:
             logger.warning(f"REAL BUY skipped {symbol}: {quote} balance too low")
             return False
-        # NOTE: no early return here when `allocated < min_notional`. The
-        # exchange minimum is a hard floor, so for very small balances the walk
-        # below grows the position (still capped by balance) until it becomes
-        # sellable. Skipping would make the bot unable to trade at all when the
-        # configured allocation is under the NOTIONAL floor.
+
+        # Position size FLOOR: sizing right at the exchange NOTIONAL minimum
+        # means fees + a tiny adverse move push the position below the sellable
+        # threshold (dust trap → force-close). Enforce a comfortable floor
+        # above the exchange minimum; skip when the balance can't support it.
+        floor = settings.crypto_real_min_position_quote or 0
+        if floor > min_notional and allocated < floor:
+            if balance >= floor * 1.02:
+                logger.info(
+                    f"REAL BUY {symbol}: allocation {allocated:.2f} {quote} below "
+                    f"{floor:.2f} position floor — sizing up to the floor"
+                )
+                allocated = floor
+            else:
+                logger.warning(
+                    f"REAL BUY skipped {symbol}: balance {balance:.2f} {quote} cannot "
+                    f"support the {floor:.2f} minimum position size"
+                )
+                return False
 
         # Convert spend -> base quantity, rounded UP to the LOT_SIZE step so the
         # resulting position stays above the NOTIONAL floor and is sellable.
@@ -686,6 +713,18 @@ class RealTrader:
         from app.data.tokocrypto_trade_client import TokoCryptoTradeClient
         return TokoCryptoTradeClient.round_down_to_step(value, step)
 
+    @staticmethod
+    def _is_blacklisted(symbol: str) -> bool:
+        """True when the base asset is pegged (stablecoin/gold/wrapped-staked)
+        and must never be traded with TP/SL levels."""
+        blacklist = {
+            s.strip().upper()
+            for s in (settings.crypto_real_symbol_blacklist or "").split(",")
+            if s.strip()
+        }
+        base = (symbol or "").split("_")[0].strip().upper()
+        return base in blacklist
+
     async def _in_sl_cooldown(self, session, symbol: str) -> bool:
         """Check if symbol is in SL cooldown period."""
         from datetime import datetime, timedelta, timezone
@@ -702,7 +741,9 @@ class RealTrader:
             select(CryptoPaperPosition.closed_at).where(
                 CryptoPaperPosition.symbol == symbol,
                 CryptoPaperPosition.mode == "REAL",
-                CryptoPaperPosition.exit_reason == "SL",
+                # Cover both clean stop-outs and dust force-closes (SL_DUST) —
+                # dust exits used to bypass the cooldown and re-enter instantly.
+                CryptoPaperPosition.exit_reason.in_(["SL", "SL_DUST"]),
                 CryptoPaperPosition.closed_at >= cutoff,
             ).order_by(CryptoPaperPosition.closed_at.desc()).limit(1)
         )
@@ -920,6 +961,23 @@ class RealTrader:
                     return price
             except Exception:
                 continue
+        # Tokocrypto rate-limited (429) or down — fall back to the Binance
+        # public ticker so TP/SL protection never goes blind. USDT pairs only.
+        if quote == "USDT":
+            try:
+                resp = await client.get(
+                    "https://api.binance.com/api/v3/ticker/price",
+                    params={"symbol": f"{asset}{quote}"},
+                )
+                price = float(resp.json().get("price", 0))
+                if price > 0:
+                    logger.warning(
+                        f"⚠️ {asset}{quote}: Tokocrypto unavailable, using Binance price"
+                    )
+                    self._price_cache[cache_key] = (price, now)
+                    return price
+            except Exception:
+                pass
         return 0.0
 
     async def _fetch_price_from_symbol(self, symbol: str, quote: str) -> float:

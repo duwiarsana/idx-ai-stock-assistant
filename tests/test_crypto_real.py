@@ -314,6 +314,9 @@ async def test_close_position_places_market_sell(monkeypatch, make_candidate):
     sold = {}
 
     class FakeClient:
+        async def get_balance(self, asset):
+            return 0.1  # wallet holds the full position (no fee shortfall)
+
         async def get_symbol_rules(self, symbol):
             return {"step_size": 0.001, "min_qty": 0.001, "min_notional": 5.0}
 
@@ -324,11 +327,21 @@ async def test_close_position_places_market_sell(monkeypatch, make_candidate):
                                         "executedPrice": "190", "executedQuoteQty": str(quantity * 190),
                                         "symbol": symbol}}
 
+        async def limit_sell(self, symbol, quantity, price):
+            # TP exits place a LIMIT sell (slippage protection) — emulate a fill.
+            sold["symbol"] = symbol
+            sold["quantity"] = quantity
+            sold["limit_price"] = price
+            return {"code": 0, "data": {"orderId": 88, "executedQty": str(quantity),
+                                        "executedPrice": str(price), "executedQuoteQty": str(quantity * price),
+                                        "symbol": symbol}}
+
     t.client = FakeClient()
 
     class P:
         id = "pos-real-1"
         symbol = "SOL_USDT"
+        base = "SOL"
         quote = "USDT"
         display = "SOL/USDT"
         status = STATUS_OPEN
@@ -387,6 +400,7 @@ async def test_close_position_keeps_open_on_sell_failure(monkeypatch, make_candi
     class P:
         id = "pos-real-2"
         symbol = "SOL_USDT"
+        base = "SOL"
         quote = "USDT"
         display = "SOL/USDT"
         status = STATUS_OPEN
@@ -442,3 +456,180 @@ async def test_drawdown_guard_stops_new_entries(monkeypatch, make_candidate):
     res = await t.run_cycle([make_candidate()], {})
     # Drawdown exceeded → no positions opened.
     assert res["positions_opened"] == 0
+
+
+# ── Dust-trap fixes ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_dust_close_books_market_value_not_full_loss(monkeypatch):
+    """A dust force-close must book the REAL market value of holdings as PnL,
+    never -invested (-100%). The coins stay in the wallet."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    from app.services.crypto_real import RealTrader, STATUS_OPEN
+    t = RealTrader()
+
+    class FakeClient:
+        async def get_balance(self, asset):
+            return 5.5  # full position is available
+
+        async def get_symbol_rules(self, symbol):
+            return {"step_size": 0.001, "min_qty": 0.001, "min_notional": 5.0}
+
+    t.client = FakeClient()
+
+    class P:
+        id = "pos-dust-1"
+        symbol = "KAVA_USDT"
+        base = "KAVA"
+        quote = "USDT"
+        display = "KAVA/USDT"
+        status = STATUS_OPEN
+        mode = "REAL"
+        entry_price = 1.0
+        quantity = 5.5
+        invested = 5.5   # entered right AT the exchange minimum (the trap)
+        exit_price = None
+        exit_reason = None
+        realized_pnl = None
+        closed_at = None
+    pos = P()
+
+    class Account:
+        quote_asset = "USDT"
+        realized_pnl = 0.0
+        total_trades = 0
+        winning_trades = 0
+    account = Account()
+
+    class FakeSession:
+        def add(self, obj): pass
+    session = FakeSession()
+
+    # Price dipped just -10% → notional 4.95 < min 5 → unsellable → dust close.
+    ok = await t._close_position(session, pos, account, "SL", 0.9)
+    assert ok is True
+    assert pos.status == "CLOSED"
+    assert pos.exit_reason == "SL_DUST"
+    # OLD BUG: pnl was -abs(invested) = -5.5 (-100%). TRUE result: -0.55 (-10%).
+    assert pos.realized_pnl == pytest.approx(-0.55, abs=1e-6)
+    assert account.realized_pnl == pytest.approx(-0.55, abs=1e-6)
+
+
+def test_entry_gate_blocks_pegged_assets(monkeypatch):
+    """Stablecoins / gold tokens / wrapped assets must never pass the gate."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_trading_enabled", True)
+    from app.services.crypto_real import RealTrader
+    t = RealTrader()
+
+    def strong_candidate(symbol):
+        return {
+            "symbol": symbol, "display": symbol.replace("_", "/"),
+            "base": symbol.split("_")[0], "quote": "USDT",
+            "price": 1.0, "score": 95.0,
+            "tf_summaries": {"1h": {
+                "trend": "bullish", "macd_state": "bullish", "price": 1.0,
+                "ema20": 0.98, "at_high": False, "relative_volume": 3.0,
+                "atr": 0.001,
+            }},
+            "ticker": {"quoteVolume": "50_000_000", "priceChangePercent": "1.0"},
+            "price_levels": {"risk_reward": 2.0},
+        }
+
+    for pegged in ("USD1_USDT", "XUSD_USDT", "BFUSD_USDT", "PAXG_USDT",
+                   "XAUT_USDT", "WBETH_USDT", "USDC_USDT"):
+        assert t._passes_entry_gate(strong_candidate(pegged)) is False, pegged
+
+    # A real volatile asset with identical (strong) signals still passes.
+    assert t._passes_entry_gate(strong_candidate("SOL_USDT")) is True
+
+
+@pytest.mark.asyncio
+async def test_open_position_skips_when_balance_below_floor(monkeypatch, make_candidate):
+    """When the balance can't support the position-size floor, skip the BUY."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_trading_enabled", True)
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    monkeypatch.setattr(get_settings(), "crypto_real_allocation_percent", 100.0)
+
+    from app.services.crypto_real import RealTrader
+    t = RealTrader()
+
+    buys = []
+
+    class FakeClient:
+        async def get_symbol_rules(self, symbol):
+            return {"step_size": 0.001, "min_qty": 0.001, "min_notional": 5.0}
+
+        async def market_buy(self, symbol, quantity):
+            buys.append(quantity)
+            return {"code": 0, "data": {"executedQty": str(quantity),
+                                        "executedPrice": "180", "symbol": symbol}}
+
+    t.client = FakeClient()
+
+    async def fake_balance(q):
+        return 6.0  # below the 7 USDT floor (and its headroom)
+    t._real_balance = fake_balance
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+        async def flush(self): pass
+        def add(self, obj): self.added.append(obj)
+        async def execute(self, stmt, *a, **k): return FakeAccountResult()
+    session = FakeSession()
+
+    ok = await t._open_position(session, make_candidate(), 180.0, "USDT")
+    assert ok is False
+    assert buys == []          # no order placed
+    assert session.added == [] # nothing persisted
+
+
+@pytest.mark.asyncio
+async def test_open_position_sizes_up_to_floor(monkeypatch, make_candidate):
+    """Allocation below the floor is bumped UP to the floor (not to the bare
+    exchange minimum) so a small dip can't make the position unsellable."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_trading_enabled", True)
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    monkeypatch.setattr(get_settings(), "crypto_real_allocation_percent", 25.0)
+
+    from app.services.crypto_real import RealTrader
+    t = RealTrader()
+
+    buys = []
+
+    class FakeClient:
+        async def get_symbol_rules(self, symbol):
+            return {"step_size": 0.001, "min_qty": 0.001, "min_notional": 5.0}
+
+        async def market_buy(self, symbol, quantity):
+            buys.append(quantity)
+            return {"code": 0, "data": {"orderId": 90, "executedQty": str(quantity),
+                                        "executedPrice": "180",
+                                        "executedQuoteQty": str(quantity * 180),
+                                        "symbol": symbol}}
+
+    t.client = FakeClient()
+
+    async def fake_balance(q):
+        return 20.0  # 25% = 5 USDT < 7 floor, but balance supports the floor
+    t._real_balance = fake_balance
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+        async def flush(self): pass
+        def add(self, obj): self.added.append(obj)
+        async def execute(self, stmt, *a, **k): return FakeAccountResult()
+    session = FakeSession()
+
+    ok = await t._open_position(session, make_candidate(), 180.0, "USDT")
+    assert ok is True
+    assert buys, "a buy must have been placed"
+    invested = buys[0] * 180.0
+    assert invested >= 6.9  # sized at/above the 7 USDT floor (step rounding)
+    positions = [o for o in session.added if type(o).__name__ == "CryptoPaperPosition"]
+    assert len(positions) == 1

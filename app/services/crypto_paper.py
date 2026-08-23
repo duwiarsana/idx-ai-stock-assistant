@@ -344,6 +344,14 @@ class PaperTrader:
         return opened
 
     def _passes_entry_gate(self, c: dict) -> bool:
+        symbol = c.get("symbol") or ""
+        # Pegged assets (stablecoins/gold/wrapped) must never be traded — flat
+        # price by design, TP/SL levels meaningless. Same list as real mode so
+        # paper stats stay clean for future ML training data.
+        from app.services.crypto_real import RealTrader
+        if RealTrader._is_blacklisted(symbol):
+            logger.debug(f"🚫 {symbol}: pegged/blacklisted base asset — skipping")
+            return False
         score = c.get("score") or 0
         if score < settings.crypto_paper_entry_score:
             return False

@@ -164,6 +164,11 @@ class Settings(BaseSettings):
     # Min order value in quote asset. Orders below the exchange NOTIONAL filter
     # would be rejected, so we skip (never place an order this small).
     crypto_real_min_order_quote: float = 5.0
+    # Minimum POSITION value in quote asset when opening. Must sit comfortably
+    # ABOVE the exchange NOTIONAL minimum: sizing right at the exchange minimum
+    # means fees + a tiny adverse move push the position below the sellable
+    # threshold ("dust trap" — the position becomes impossible to close).
+    crypto_real_min_position_quote: float = 7.0
     # Max simultaneously open real positions.
     crypto_real_max_positions: int = 3
     # Min momentum score to open a real position (higher = more selective).
@@ -181,6 +186,14 @@ class Settings(BaseSettings):
     crypto_real_entry_min_risk_reward: float = 1.5  # minimum R:R ratio
     crypto_real_entry_max_atr_pct: float = 5.0  # max ATR% to avoid high volatility
     crypto_real_sl_cooldown_minutes: int = 180  # 3 hours cooldown after SL
+    # Base symbols never traded by the real engine: stablecoins / pegged assets /
+    # gold tokens / wrapped-staked assets. Their price is flat by design so TP/SL
+    # levels are meaningless and taker fees guarantee a slow loss. Comma-separated
+    # list of BASE symbols (the part before the "_USDT" suffix).
+    crypto_real_symbol_blacklist: str = (
+        "USD1,USDC,FDUSD,TUSD,USDP,DAI,USDS,USDE,FRAX,PYUSD,EURI,AEUR,XUSD,BFUSD,"
+        "PAXG,XAUT,WBETH,BNSOL,WBTC,WETH,WBNB,STETH,WSTETH,RETH,CBETH"
+    )
 
     # ── MQTT (ESP32 sound alerts) ─────────────────────
     mqtt_enabled: bool = False

@@ -245,6 +245,28 @@ f"PnL: {pnl_str} ({pnl_pct:+.2f}%)"  # +0.0027 → "+0.0027 (+0.05%)"
 
 ---
 
+## 11. DUST TRAP: JANGAN SIZE POSISI PAS DI MINIMUM NOTIONAL BURSA
+
+**Masalah (ditemukan 2026-08-23):** Posisi di-size ~5.02 USDT (persis min_notional
+bursa 5 USDT). Fee taker dipotong dari koin + turun harga sedikit → nilai posisi
+< 5 USDT → sell ditolak bursa (error 3210) → bot force-close sebagai `SL_DUST`.
+
+**Dampak:** `pnl = -abs(invested)` mencatat **-100%** padahal koin masih di wallet
+dan harga hanya turun 1-4% (bahkan ada yang positif!). 5 trade SL_DUST = -25 USDT,
+menghapus semua profit TP1 (+1.4 USDT).
+
+**Solusi yang diterapkan:**
+1. PnL dust = nilai pasar riil (`qty_sell * price - cost_basis`), bukan `-invested`
+2. Floor ukuran posisi: `CRYPTO_REAL_MIN_POSITION_QUOTE=7` (buffer ~29% di atas minimum)
+3. Blacklist aset pegged: stablecoin/gold/wrapped tidak pernah ditradingkan
+   (`CRYPTO_REAL_SYMBOL_BLACKLIST`) — harga flat, TP/SL tidak berarti
+4. Cooldown SL sekarang mencakup `SL_DUST`, bukan hanya `SL`
+
+**Pelajaran:** Selalu ukur posisi dengan buffer di atas batas minimum bursa.
+Aset pegged lolos filter volatilitas (ATR rendah!) — harus diblacklist eksplisit.
+
+---
+
 ## File Penting yang Sering Diubah
 
 | File | Fungsi | Yang Perlu Diperhatikan |
