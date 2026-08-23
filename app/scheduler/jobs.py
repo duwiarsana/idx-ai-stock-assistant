@@ -379,15 +379,18 @@ async def weekly_ml_retrain():
     """
     logger.info("🤖 Starting weekly ML model retraining...")
     tickers = await get_all_active_tickers()
+
+    # Batch download (parallel per batch) — the old per-ticker sequential
+    # fetch took hours for 900+ tickers and usually died to rate limits.
     histories = {}
-    
-    for ticker in tickers:
+    batch_size = 150
+    for i in range(0, len(tickers), batch_size):
         try:
-            data = await stock_data_fetcher.fetch_stock_data(ticker, days=365)
-            if data:
-                histories[ticker] = data.get("history", [])
+            histories.update(
+                await fetch_batch_histories(tickers[i:i + batch_size], days=365)
+            )
         except Exception as e:
-            logger.warning(f"  Failed to fetch history for {ticker}: {e}")
+            logger.warning(f"  Batch {i // batch_size + 1} failed: {e}")
 
     if len(histories) < 5:
         logger.warning("Not enough ticker data for ML training")
