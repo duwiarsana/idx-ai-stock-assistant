@@ -208,8 +208,9 @@ async def intraday_scanner_job():
         await asyncio.sleep(1) # Small delay between batches to respect Yahoo Finance limits
         
     logger.info(f"Downloaded histories for {len(all_histories)} tickers. Analyzing potential setups...")
-    
+
     # 2. Process and filter tickers in memory
+    candidates: list[tuple[float, str, float, object]] = []
     for ticker, history in all_histories.items():
         try:
             if len(history) < 20:
@@ -235,45 +236,71 @@ async def intraday_scanner_job():
 
             # Run analysis engine rules
             analysis = run_analysis(ticker, history)
-            
-            # Signal criteria: Technical Score >= 55 and BUY signal (lowered from 70)
-            if analysis and analysis.final_score >= 55 and analysis.signal == "BUY":
-                # Fetch AI analysis text
-                ai_res = await ai_service.analyze_stock(ticker)
-                narrative = "Analisis AI tidak tersedia."
-                if isinstance(ai_res, dict):
-                    narrative = ai_res.get("analysis", narrative)
-                elif isinstance(ai_res, str):
-                    narrative = ai_res
 
-                entry_low = analysis.entry_zone.get("low", current_price)
-                entry_high = analysis.entry_zone.get("high", current_price)
-                
-                message = (
-                    f"🚨 **IDX AI POTENTIAL SIGNAL DETECTED** 🚨\n\n"
-                    f"Ticker: **{ticker}.JK**\n"
-                    f"Technical Score: **{analysis.final_score:.1f}/100**\n"
-                    f"Trend: **{analysis.trend_status}**\n\n"
-                    f"💵 **Entry Area**: Rp {entry_low:,.0f} - Rp {entry_high:,.0f}\n"
-                    f"🎯 **Target Profit (TP1)**: Rp {analysis.take_profit:,.0f}\n"
-                    f"🛑 **Stop Loss (SL)**: Rp {analysis.stop_loss:,.0f}\n"
-                    f"⚖️ **Risk Reward**: 1:{analysis.risk_reward_ratio:.1f}\n\n"
-                    f"📝 **Alasan AI**:\n{narrative}\n\n"
-                    f"⚠️ *Disclaimer: Bukan ajakan beli. Gunakan manajemen risiko pribadi.*"
-                )
-                
-                await bot.send_message(
-                    chat_id=settings.telegram_admin_id,
-                    text=message,
-                    parse_mode="Markdown"
-                )
-                logger.info(f"✅ Instantly alerted potential buy signal for {ticker}")
-                
-                # Set 4 hour cooldown (14400 seconds) - reduced from 24h
-                await cache_service.redis.setex(cooldown_key, 14400, "sent")
-                
+            # Signal criteria: strong technicals ONLY (tunable via config).
+            # Loose gates flooded Telegram with 100+ alerts/hour — everything
+            # looked like a "BUY". Collect candidates first, send top N.
+            if (
+                analysis
+                and analysis.final_score >= settings.idx_alert_min_score
+                and analysis.signal == "BUY"
+            ):
+                rr = analysis.risk_reward_ratio
+                if rr is not None and rr < settings.idx_alert_min_risk_reward:
+                    continue  # bad risk/reward — not worth alerting
+                candidates.append((analysis.final_score, ticker, current_price, analysis))
+
         except Exception as e:
             logger.error(f"Error scanning {ticker} in intraday: {e}")
+
+    # Alert only the strongest setups this run to keep signal meaningful.
+    candidates.sort(key=lambda c: c[0], reverse=True)
+    logger.info(
+        f"⚡ {len(candidates)} intraday candidates passed the gate — "
+        f"alerting top {min(len(candidates), settings.idx_alert_max_per_run)}"
+    )
+    for final_score, ticker, current_price, analysis in candidates[
+        : settings.idx_alert_max_per_run
+    ]:
+        try:
+            cooldown_key = f"alert_cooldown:{ticker}"
+            if await cache_service.redis.get(cooldown_key):
+                continue
+            # Fetch AI analysis text
+            ai_res = await ai_service.analyze_stock(ticker)
+            narrative = "Analisis AI tidak tersedia."
+            if isinstance(ai_res, dict):
+                narrative = ai_res.get("analysis", narrative)
+            elif isinstance(ai_res, str):
+                narrative = ai_res
+
+            entry_low = analysis.entry_zone.get("low", current_price)
+            entry_high = analysis.entry_zone.get("high", current_price)
+
+            message = (
+                f"🚨 **IDX AI POTENTIAL SIGNAL DETECTED** 🚨\n\n"
+                f"Ticker: **{ticker}.JK**\n"
+                f"Technical Score: **{analysis.final_score:.1f}/100**\n"
+                f"Trend: **{analysis.trend_status}**\n\n"
+                f"💵 **Entry Area**: Rp {entry_low:,.0f} - Rp {entry_high:,.0f}\n"
+                f"🎯 **Target Profit (TP1)**: Rp {analysis.take_profit:,.0f}\n"
+                f"🛑 **Stop Loss (SL)**: Rp {analysis.stop_loss:,.0f}\n"
+                f"⚖️ **Risk Reward**: 1:{analysis.risk_reward_ratio:.1f}\n\n"
+                f"📝 **Alasan AI**:\n{narrative}\n\n"
+                f"⚠️ *Disclaimer: Bukan ajakan beli. Gunakan manajemen risiko pribadi.*"
+            )
+
+            await bot.send_message(
+                chat_id=settings.telegram_admin_id,
+                text=message,
+                parse_mode="Markdown"
+            )
+            logger.info(f"✅ Instantly alerted potential buy signal for {ticker}")
+
+            # Set 4 hour cooldown (14400 seconds) - reduced from 24h
+            await cache_service.redis.setex(cooldown_key, 14400, "sent")
+        except Exception as e:
+            logger.error(f"Error alerting {ticker}: {e}")
 
     logger.info("✅ Intraday periodic scanner complete.")
 

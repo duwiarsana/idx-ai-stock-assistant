@@ -195,6 +195,14 @@ class Settings(BaseSettings):
         "PAXG,XAUT,WBETH,BNSOL,WBTC,WETH,WBNB,STETH,WSTETH,RETH,CBETH"
     )
 
+    # ── IDX Intraday Alerts ───────────────────────────
+    # Alert gate for the hourly intraday scanner (09:00-15:00 WIB, Mon-Fri).
+    # A loose gate (score>=55) produced 100+ alerts/hour — everything looked
+    # like a BUY. Keep these strict so alerts stay meaningful.
+    idx_alert_min_score: int = 68
+    idx_alert_min_risk_reward: float = 1.5
+    idx_alert_max_per_run: int = 10
+
     # ── MQTT (ESP32 sound alerts) ─────────────────────
     mqtt_enabled: bool = False
     mqtt_host: str = "localhost"
