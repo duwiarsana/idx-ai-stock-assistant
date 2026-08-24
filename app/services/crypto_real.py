@@ -445,9 +445,23 @@ class RealTrader:
                 return True
             # A failed SELL must not be silently swallowed — keep position OPEN
             # so the next cycle can try again. Log loudly.
-            logger.error(f"REAL SELL FAILED for {pos.symbol}: {e}")
-            self.state["last_error"] = f"SELL_FAIL {pos.symbol}: {e}"
-            return False
+            # LIMIT-specific rejection (bad tick size / unknown param): retry
+            # ONCE as a MARKET sell so a TP exit can never stay stuck open.
+            if action in (EXIT_TP1, EXIT_TP2):
+                logger.warning(
+                    f"⚠️ {pos.symbol}: LIMIT sell rejected ({e}) — falling back to MARKET sell"
+                )
+                try:
+                    resp = await self.client.market_sell(pos.symbol, qty_sell)
+                    fill = self._parse_fill(resp)
+                except Exception as e2:
+                    logger.error(f"REAL SELL FAILED for {pos.symbol}: {e2}")
+                    self.state["last_error"] = f"SELL_FAIL {pos.symbol}: {e2}"
+                    return False
+            else:
+                logger.error(f"REAL SELL FAILED for {pos.symbol}: {e}")
+                self.state["last_error"] = f"SELL_FAIL {pos.symbol}: {e}"
+                return False
 
         exit_price = fill.get("price") or price
         proceeds = qty_sell * exit_price
@@ -866,7 +880,7 @@ class RealTrader:
         
         # Get open positions from database (only bot-traded coins)
         from app.db.session import async_session_factory
-        from sqlalchemy import select
+        from sqlalchemy import select, func
         from app.models.crypto import CryptoPaperPosition
         
         async with async_session_factory() as session:
@@ -880,41 +894,8 @@ class RealTrader:
             )
             open_positions = result.scalars().all()
         
-        if not open_positions:
-            return f"\n💼 *Portfolio:* Tidak ada posisi terbuka\n"
-        
-        # Build holdings from open positions only
-        holdings_lines = []
-        total_held_value = 0
-        
-        for pos in open_positions:
-            try:
-                price = await self._fetch_price_from_symbol(pos.symbol, quote)
-            except Exception:
-                price = pos.entry_price  # fallback to entry price
-            
-            value = pos.quantity * price
-            total_held_value += value
-            pnl = (price - pos.entry_price) * pos.quantity
-            pnl_pct = ((price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price > 0 else 0
-            
-            emoji = "🟢" if pnl >= 0 else "🔴"
-            holdings_lines.append(
-                f"  {emoji} {pos.display}: {pos.quantity:.4f} @ {price:.6f} "
-                f"(≈ {value:.2f} {quote}, {pnl:+.2f} {quote}/{pnl_pct:+.1f}%)"
-            )
-        
-        holdings_text = "\n".join(holdings_lines)
-        
-        # Get cash balance (optional, can be skipped for cleaner output)
-        try:
-            cash = await self._real_balance(quote)
-        except Exception:
-            cash = 0.0
-        
-        total_value = cash + total_held_value
-        
-        # Realized PnL from REAL positions only
+        # Realized PnL from REAL positions only — computed even when there are
+        # no open positions so sell alerts always carry lifetime stats.
         realized = 0.0
         total_trades = 0
         winning = 0
@@ -937,16 +918,58 @@ class RealTrader:
                 realized = float(row[0])
                 total_trades = int(row[1])
                 winning = int(row[2])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"⚠️ Portfolio stats query failed: {e}")
 
         pnl_emoji = "✅" if realized >= 0 else "🔻"
         line = "\n━━━━━━━━━━━━━━━━━━━━\n"
         line += "💼 *PORTOFOLIO BOT (REAL)*\n\n"
-        line += f"📊 *Posisi Terbuka ({len(open_positions)}):*\n{holdings_text}\n"
-        line += f"💰 Saldo {quote}: **{_fmt_price(cash)}**\n"
-        line += f"🏦 Total Invested: **{_fmt_price(total_held_value)} {quote}**\n"
-        line += f"💵 *TOTAL VALUE: **{_fmt_price(total_value)} {quote}***\n\n"
+        
+        if not open_positions:
+            line += f"📊 *Posisi Terbuka:* Tidak ada\n"
+            try:
+                cash = await self._real_balance(quote)
+                if cash is not None:
+                    line += f"💰 Saldo {quote}: **{_fmt_price(cash)}**\n"
+            except Exception:
+                pass
+        else:
+            # Build holdings from open positions only
+            holdings_lines = []
+            total_held_value = 0
+            
+            for pos in open_positions:
+                try:
+                    price = await self._fetch_price_from_symbol(pos.symbol, quote)
+                except Exception:
+                    price = pos.entry_price  # fallback to entry price
+                
+                value = pos.quantity * price
+                total_held_value += value
+                pnl = (price - pos.entry_price) * pos.quantity
+                pnl_pct = ((price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price > 0 else 0
+                
+                emoji = "🟢" if pnl >= 0 else "🔴"
+                holdings_lines.append(
+                    f"  {emoji} {pos.display}: {pos.quantity:.4f} @ {price:.6f} "
+                    f"(≈ {value:.2f} {quote}, {pnl:+.2f} {quote}/{pnl_pct:+.1f}%)"
+                )
+            
+            holdings_text = "\n".join(holdings_lines)
+            
+            # Get cash balance (optional, can be skipped for cleaner output)
+            try:
+                cash = await self._real_balance(quote)
+            except Exception:
+                cash = 0.0
+            
+            total_value = cash + total_held_value
+            
+            line += f"📊 *Posisi Terbuka ({len(open_positions)}):*\n{holdings_text}\n"
+            line += f"💰 Saldo {quote}: **{_fmt_price(cash)}**\n"
+            line += f"🏦 Total Invested: **{_fmt_price(total_held_value)} {quote}**\n"
+            line += f"💵 *TOTAL VALUE: **{_fmt_price(total_value)} {quote}***\n\n"
+        
         line += f"{pnl_emoji} Total Realized PnL: **{realized:+,.2f} {quote}**\n"
         line += f"📊 Total Trade: {total_trades} ({winning} menang, {total_trades - winning} rugi)\n"
         line += "━━━━━━━━━━━━━━━━━━━━"

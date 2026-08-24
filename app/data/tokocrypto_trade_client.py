@@ -180,10 +180,14 @@ class TokoCryptoTradeClient:
             filters = row.get("filters") or []
             lot = next((f for f in filters if f.get("filterType") == "LOT_SIZE"), {})
             noti = next((f for f in filters if f.get("filterType") == "NOTIONAL"), {})
+            prc = next((f for f in filters if f.get("filterType") == "PRICE_FILTER"), {})
             return {
                 "step_size": float(lot.get("stepSize") or 0),
                 "min_qty": float(lot.get("minQty") or 0),
                 "min_notional": float(noti.get("minNotional") or 0),
+                # LIMIT orders MUST be priced at a multiple of tickSize or the
+                # exchange rejects them with "Request Parameter Error".
+                "tick_size": float(prc.get("tickSize") or 0),
             }
         except Exception:
             return self._default_rules(symbol)
@@ -258,8 +262,9 @@ class TokoCryptoTradeClient:
         """Place a limit SELL order at ``price`` for ``quantity``.
 
         Used for TP exits to avoid market-order slippage on thin books.
-        The limit price is set slightly below the TP level to ensure fill
-        while still protecting against slippage.
+        Params mirror the documented LIMIT example exactly (symbol, side,
+        type=LIMIT, quantity, price) — extra fields like ``timeInForce`` are
+        rejected by the API with "Request Parameter Error".
         """
         return await self._request(
             "POST",
@@ -270,7 +275,6 @@ class TokoCryptoTradeClient:
                 type=ORDER_LIMIT,
                 quantity=self.fmt_qty(quantity),
                 price=self.fmt_qty(price),
-                timeInForce="GTC",
             ),
         )
 

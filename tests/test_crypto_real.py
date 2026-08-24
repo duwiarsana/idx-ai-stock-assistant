@@ -55,6 +55,62 @@ def test_parse_fill_normalises_market_buy():
 
 
 @pytest.mark.asyncio
+async def test_limit_sell_matches_documented_params(monkeypatch):
+    """LIMIT sell must send exactly the documented params — extra fields like
+    timeInForce trigger 'Request Parameter Error' on Tokocrypto."""
+    captured = {}
+
+    class FakeResp:
+        def json(self):
+            return {"code": 0, "data": {"orderId": 5, "executedQty": "1",
+                                        "executedPrice": "3.494", "symbol": "EGLD_USDT"}}
+
+    class FakeClient:
+        is_closed = False
+
+        async def post(self, url, data=None, headers=None):
+            captured["data"] = data
+            return FakeResp()
+
+    c = make_client(monkeypatch)
+    c._client = FakeClient()
+    await c.limit_sell("EGLD_USDT", 1.452, 3.494)
+    d = captured["data"]
+    assert d["type"] == 1            # ORDER_LIMIT
+    assert d["side"] == 1            # SELL
+    assert d["quantity"] == "1.452"
+    assert d["price"] == "3.494"
+    assert "timeInForce" not in d
+
+
+@pytest.mark.asyncio
+async def test_get_symbol_rules_parses_tick_size(monkeypatch):
+    class FakeResp:
+        def json(self):
+            return {"code": 0, "data": {"list": [{
+                "symbol": "EGLD_USDT",
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                    {"filterType": "NOTIONAL", "minNotional": "5"},
+                    {"filterType": "PRICE_FILTER", "tickSize": "0.001"},
+                ],
+            }]}}
+
+    class FakeClient:
+        is_closed = False
+
+        async def get(self, url, params=None, headers=None):
+            return FakeResp()
+
+    c = make_client(monkeypatch)
+    c._client = FakeClient()
+    rules = await c.get_symbol_rules("EGLD_USDT")
+    assert rules["tick_size"] == 0.001
+    assert rules["step_size"] == 0.001
+    assert rules["min_notional"] == 5.0
+
+
+@pytest.mark.asyncio
 async def test_market_buy_sends_signed_post(monkeypatch):
     captured = {}
 
@@ -458,6 +514,74 @@ async def test_drawdown_guard_stops_new_entries(monkeypatch, make_candidate):
     assert res["positions_opened"] == 0
 
 
+@pytest.mark.asyncio
+async def test_tp_exit_falls_back_to_market_when_limit_rejected(monkeypatch):
+    """A LIMIT sell rejected by the exchange must retry as MARKET so the TP
+    exit never leaves the position stuck open (the Aug-2026 bug)."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    from app.services.crypto_real import RealTrader, STATUS_OPEN
+    t = RealTrader()
+
+    calls = []
+
+    class FakeClient:
+        async def get_balance(self, asset):
+            return 5.0
+
+        async def get_symbol_rules(self, symbol):
+            return {"step_size": 0.001, "min_qty": 0.001,
+                    "min_notional": 5.0, "tick_size": 0.001}
+
+        async def limit_sell(self, symbol, quantity, price):
+            calls.append("limit")
+            raise Exception("API error 400 on /open/v1/orders: Request Parameter Error")
+
+        async def market_sell(self, symbol, quantity):
+            calls.append("market")
+            return {"code": 0, "data": {"orderId": 99, "executedQty": str(quantity),
+                                        "executedPrice": "3.494",
+                                        "executedQuoteQty": str(quantity * 3.494),
+                                        "symbol": symbol}}
+
+    t.client = FakeClient()
+
+    class P:
+        id = "pos-fallback-1"
+        symbol = "EGLD_USDT"
+        base = "EGLD"
+        quote = "USDT"
+        display = "EGLD/USDT"
+        status = STATUS_OPEN
+        mode = "REAL"
+        entry_price = 3.425
+        quantity = 2.0
+        invested = 6.85
+        take_profit_1 = 3.49350
+        exit_price = None
+        exit_reason = None
+        realized_pnl = None
+        closed_at = None
+    pos = P()
+
+    class Account:
+        quote_asset = "USDT"
+        realized_pnl = 0.0
+        total_trades = 0
+        winning_trades = 0
+    account = Account()
+
+    class FakeSession:
+        def add(self, obj): pass
+    session = FakeSession()
+
+    ok = await t._close_position(session, pos, account, "TP1", 3.494)
+    assert ok is True
+    assert calls == ["limit", "market"]   # tried limit first, then market
+    assert pos.status == "CLOSED"
+    assert pos.exit_reason == "TP1"
+
+
 # ── Dust-trap fixes ───────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -633,3 +757,55 @@ async def test_open_position_sizes_up_to_floor(monkeypatch, make_candidate):
     assert invested >= 6.9  # sized at/above the 7 USDT floor (step rounding)
     positions = [o for o in session.added if type(o).__name__ == "CryptoPaperPosition"]
     assert len(positions) == 1
+
+# ── Portfolio summary regression: stats must survive empty book ────────
+
+@pytest.mark.asyncio
+async def test_portfolio_summary_includes_stats_with_no_open_positions(monkeypatch):
+    """After the last sell (no OPEN positions) the Telegram summary must still
+    include Total Realized PnL and Total Trade. Regression for the missing
+    ``func`` import that silently zeroed the stats via except/pass."""
+    from types import SimpleNamespace
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    from app.services import crypto_real as cr
+
+    t = cr.RealTrader()
+
+    async def fake_balance(q):
+        return 123.45
+    t._real_balance = fake_balance
+
+    # First query (OPEN positions) → none left. Second query (stats) → 7 trades.
+    class FakeResult:
+        def __init__(self, value):
+            self._value = value
+        def scalars(self):
+            return self
+        def all(self):
+            return self._value
+        def one(self):
+            return self._value
+
+    calls = {"n": 0}
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def execute(self, stmt, *a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return FakeResult([])                       # no open positions
+            return FakeResult((-1694.21, 7, 2))             # sum, count, wins
+
+    import app.db.session as db_session
+    orig_factory = db_session.async_session_factory
+    monkeypatch.setattr(db_session, "async_session_factory", lambda: FakeSession())
+
+    text = await t._portfolio_summary("USDT")
+
+    assert "Tidak ada" in text                      # open positions section present
+    assert "-1,694.21 USDT" in text                 # realized PnL NOT zeroed/missing
+    assert "Total Trade: 7" in text and "2 menang" in text
