@@ -77,22 +77,24 @@
                 <div class="card bg-white rounded-xl shadow-md p-6">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-gray-500 text-sm">Win Rate</p>
-                            <p class="text-2xl font-bold text-green-600" id="winRate">-</p>
+                            <p class="text-gray-500 text-sm">PnL REAL 🔴</p>
+                            <p class="text-2xl font-bold" id="realPnL">-</p>
+                            <p class="text-xs text-gray-500 mt-1" id="realWinRate">-</p>
                         </div>
-                        <div class="bg-green-100 p-3 rounded-lg">
-                            <span class="text-2xl">🎯</span>
+                        <div class="bg-red-100 p-3 rounded-lg">
+                            <span class="text-2xl">💸</span>
                         </div>
                     </div>
                 </div>
                 <div class="card bg-white rounded-xl shadow-md p-6">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-gray-500 text-sm">Total PnL</p>
-                            <p class="text-2xl font-bold" id="totalPnL">-</p>
+                            <p class="text-gray-500 text-sm">PnL PAPER 🔵</p>
+                            <p class="text-2xl font-bold" id="paperPnL">-</p>
+                            <p class="text-xs text-gray-500 mt-1" id="paperWinRate">-</p>
                         </div>
-                        <div class="bg-orange-100 p-3 rounded-lg">
-                            <span class="text-2xl">💹</span>
+                        <div class="bg-blue-100 p-3 rounded-lg">
+                            <span class="text-2xl">🧪</span>
                         </div>
                     </div>
                 </div>
@@ -135,6 +137,7 @@
                         <thead class="bg-gray-50">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Coin</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Mode</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Entry</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Current</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Invested</th>
@@ -159,6 +162,7 @@
                         <thead class="bg-gray-50">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Coin</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Mode</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Entry</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Exit</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">PnL</th>
@@ -208,19 +212,32 @@
             const openPositions = positions.open_positions || [];
             const closedPositions = positions.closed_positions || [];
             const stats = positions.performance_stats || [];
-            
+
             const realStats = stats.find(s => s.mode === 'REAL') || {};
+            const paperStats = stats.find(s => s.mode === 'PAPER') || {};
             const totalInvested = openPositions.reduce((sum, p) => sum + (p.invested || 0), 0);
-            
+
             // Update stats cards
             document.getElementById('totalInvested').textContent = totalInvested.toFixed(2) + ' USDT';
-            document.getElementById('openPositions').textContent = openPositions.length;
-            document.getElementById('winRate').textContent = (realStats.win_rate || 0) + '%';
-            
-            const totalPnL = realStats.total_pnl || 0;
-            const pnlElement = document.getElementById('totalPnL');
-            pnlElement.textContent = (totalPnL >= 0 ? '+' : '') + totalPnL.toFixed(2) + ' USDT';
-            pnlElement.className = 'text-2xl font-bold ' + (totalPnL >= 0 ? 'text-green-600' : 'text-red-600');
+            document.getElementById('openPositions').textContent =
+                `${openPositions.filter(p => p.mode === 'REAL').length} real / ${openPositions.filter(p => p.mode === 'PAPER').length} paper`;
+
+            function setModeCard(pnlId, wrId, st) {
+                const pnl = st.total_pnl || 0;
+                const el = document.getElementById(pnlId);
+                el.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' USDT';
+                el.className = 'text-2xl font-bold ' + (pnl >= 0 ? 'text-green-600' : 'text-red-600');
+                const total = (st.wins || 0) + (st.losses || 0);
+                document.getElementById(wrId).textContent =
+                    total > 0 ? `WR ${st.win_rate || 0}% · ${total} trade` : 'belum ada trade';
+            }
+            setModeCard('realPnL', 'realWinRate', realStats);
+            setModeCard('paperPnL', 'paperWinRate', paperStats);
+
+            function modeBadge(mode) {
+                if (mode === 'REAL') return '<span class="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-bold">REAL</span>';
+                return '<span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">PAPER</span>';
+            }
             
             // Render potential coins
             const candidates = potential.coins || [];
@@ -254,6 +271,7 @@
                 return `
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-semibold">${pos.display || pos.symbol}</td>
+                        <td class="px-4 py-3">${modeBadge(pos.mode)}</td>
                         <td class="px-4 py-3 text-sm">${pos.entry_price.toFixed(6)}</td>
                         <td class="px-4 py-3 text-sm font-semibold ${pos.current_price >= pos.entry_price ? 'text-green-600' : 'text-red-600'}">
                             ${pos.current_price ? pos.current_price.toFixed(6) : '-'}
@@ -279,11 +297,11 @@
                         </td>
                     </tr>
                 `;
-            }).join('') : '<tr><td colspan="9" class="px-4 py-6 text-center text-gray-500">Tidak ada posisi terbuka</td></tr>';
+            }).join('') : '<tr><td colspan="10" class="px-4 py-6 text-center text-gray-500">Tidak ada posisi terbuka</td></tr>';
             
             // Update total unrealized PnL
             const totalPnLElement = document.getElementById('totalUnrealizedPnL');
-            totalPnLElement.textContent = `Total: ${totalUnrealizedPnL >= 0 ? '+' : ''}${totalUnrealizedPnL.toFixed(2)} USDT`;
+            totalPnLElement.textContent = `Total (REAL+PAPER): ${totalUnrealizedPnL >= 0 ? '+' : ''}${totalUnrealizedPnL.toFixed(2)} USDT`;
             totalPnLElement.className = 'text-sm font-semibold ' + (totalUnrealizedPnL >= 0 ? 'text-green-600' : 'text-red-600');
             
             // Render closed positions
@@ -294,6 +312,7 @@
                 return `
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-semibold">${trade.display || trade.symbol}</td>
+                        <td class="px-4 py-3">${modeBadge(trade.mode)}</td>
                         <td class="px-4 py-3 text-sm">${trade.entry_price.toFixed(6)}</td>
                         <td class="px-4 py-3 text-sm">${trade.exit_price ? trade.exit_price.toFixed(6) : '-'}</td>
                         <td class="px-4 py-3 ${pnlColor} font-semibold">${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(4)} USDT</td>
@@ -306,7 +325,7 @@
                         <td class="px-4 py-3 text-xs text-gray-600">${trade.exit_date || '-'}</td>
                     </tr>
                 `;
-            }).join('') : '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-500">Belum ada transaksi</td></tr>';
+            }).join('') : '<tr><td colspan="8" class="px-4 py-6 text-center text-gray-500">Belum ada transaksi</td></tr>';
         }
         
         function refreshData() {

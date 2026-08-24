@@ -159,22 +159,29 @@ async def crypto_positions_summary():
         )
         closed_positions = result.scalars().all()
         
-        # Performance stats by mode
+        # Performance stats by mode (closed trades only)
         from sqlalchemy import case
-        
+
         stats_result = await session.execute(
             select(
                 CryptoPaperPosition.mode,
                 func.count().label("total"),
-                func.sum(case((CryptoPaperPosition.status == "OPEN", 1), else_=0)).label("open_count"),
                 func.sum(case((CryptoPaperPosition.realized_pnl > 0, 1), else_=0)).label("wins"),
                 func.sum(case((CryptoPaperPosition.realized_pnl < 0, 1), else_=0)).label("losses"),
-                func.sum(CryptoPaperPosition.realized_pnl).label("total_pnl"),
+                func.coalesce(func.sum(CryptoPaperPosition.realized_pnl), 0.0).label("total_pnl"),
                 func.avg(CryptoPaperPosition.realized_pnl).label("avg_pnl"),
             )
+            .where(CryptoPaperPosition.status == "CLOSED")
             .group_by(CryptoPaperPosition.mode)
         )
-        stats = result.scalars().all()
+        # NOTE: use stats_result (fresh execute) — re-reading `result` after
+        # scalars().all() returns an exhausted cursor (this zeroed all stats).
+        stats_rows = stats_result.all()
+
+        # Count open positions per mode from data already loaded
+        open_count_by_mode: dict = {}
+        for p in open_positions:
+            open_count_by_mode[p.mode] = open_count_by_mode.get(p.mode, 0) + 1
         
         # Enrich open positions with current prices and unrealized PnL
         open_data = []
@@ -224,14 +231,14 @@ async def crypto_positions_summary():
             {
                 "mode": s.mode,
                 "total_trades": s.total,
-                "open_positions": s.open_count,
-                "wins": s.wins,
-                "losses": s.losses,
+                "open_positions": open_count_by_mode.get(s.mode, 0),
+                "wins": int(s.wins or 0),
+                "losses": int(s.losses or 0),
                 "win_rate": round((s.wins / s.total * 100), 1) if s.total and s.total > 0 else 0,
-                "total_pnl": round(s.total_pnl, 2) if s.total_pnl else 0,
+                "total_pnl": round(s.total_pnl, 2),
                 "avg_pnl": round(s.avg_pnl, 4) if s.avg_pnl else 0,
             }
-            for s in stats
+            for s in stats_rows
         ]
     
     return {
