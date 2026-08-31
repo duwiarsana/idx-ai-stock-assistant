@@ -205,7 +205,7 @@ class Settings(BaseSettings):
     # list of BASE symbols (the part before the "_USDT" suffix).
     crypto_real_symbol_blacklist: str = (
         "USD1,USDC,FDUSD,TUSD,USDP,DAI,USDS,USDE,FRAX,PYUSD,EURI,AEUR,XUSD,BFUSD,"
-        "PAXG,XAUT,WBETH,BNSOL,WBTC,WETH,WBNB,STETH,WSTETH,RETH,CBETH"
+        "U,RLUSD,PAXG,XAUT,WBETH,BNSOL,WBTC,WETH,WBNB,STETH,WSTETH,RETH,CBETH"
     )
 
     # ── IDX Intraday Alerts ───────────────────────────

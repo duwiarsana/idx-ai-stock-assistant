@@ -809,3 +809,46 @@ async def test_portfolio_summary_includes_stats_with_no_open_positions(monkeypat
     assert "Tidak ada" in text                      # open positions section present
     assert "-1,694.21 USDT" in text                 # realized PnL NOT zeroed/missing
     assert "Total Trade: 7" in text and "2 menang" in text
+
+
+# ── Pegged-asset guard: never buy a stablecoin with TP/SL ─────────────
+
+@pytest.mark.asyncio
+async def test_pegged_guard_blocks_newly_listed_stablecoin(monkeypatch):
+    """A stablecoin not in the static blacklist (e.g. RLUSD) must be refused
+    via the defensive exchange-rules pegged check before any money is spent."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    from app.services.crypto_real import RealTrader
+    t = RealTrader()
+
+    class FakeClient:
+        async def get_symbol_rules(self, symbol):
+            # RLUSD-style 1:1 stablecoin: step ~1.0 → flagged as pegged
+            if symbol == "RLUSD_USDT":
+                return {"step_size": 1.0, "min_qty": 1.0, "min_notional": 5.0, "tick_size": 0.0001}
+            return {"step_size": 0.001, "min_qty": 0.001, "min_notional": 5.0, "tick_size": 0.00001}
+    t.client = FakeClient()
+
+    # RLUSD looks like a genuine 1:1 stablecoin → guard must refuse BEFORE market_buy
+    assert await t._is_pegged("RLUSD_USDT") is True
+
+    # A normal alt is allowed (returns False for pegged)
+    assert await t._is_pegged("BTC_USDT") is False
+
+
+@pytest.mark.asyncio
+async def test_pegged_guard_covers_blacklist_without_rules(monkeypatch):
+    """A blacklisted stablecoin is refused even if rules lookup fails."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    from app.services.crypto_real import RealTrader
+    t = RealTrader()
+
+    class FakeClient:
+        async def get_symbol_rules(self, symbol):
+            raise RuntimeError("no rules")
+    t.client = FakeClient()
+
+    # U is now in the static blacklist → refused even without rules
+    assert await t._is_pegged("U_USDT") is True

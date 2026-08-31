@@ -682,6 +682,15 @@ class RealTrader:
             return False
 
         # ── REAL BUY order ────────────────────────────────────────────
+        # Defensive pegged-asset guard right before we commit money: catches
+        # newly-listed stablecoins (e.g. U, RLUSD) that slipped past the static
+        # blacklist. A peg trades flat ~1.00, so TP/SL levels are meaningless
+        # and taker fees guarantee a loss.
+        if await self._is_pegged(symbol):
+            logger.warning(f"🛡️ REAL BUY refused {symbol}: pegged/stablecoin detected")
+            self.state["last_error"] = f"BUY_REFUSED_PEGGED {symbol}"
+            return False
+
         try:
             resp = await self.client.market_buy(symbol, qty)
             fill = self._parse_fill(resp)
@@ -765,6 +774,37 @@ class RealTrader:
         }
         base = (symbol or "").split("_")[0].strip().upper()
         return base in blacklist
+
+    # Cache of symbols already known to be pegged → avoids a network call to
+    # rule-check the same stablecoin over and over.
+    __pegged_base_cache: set = set()
+
+    async def _is_pegged(self, symbol: str) -> bool:
+        """Robust pegged-asset guard: checks the configured blacklist AND,
+        as a safety net for newly-listed stablecoins, the exchange LOT_SIZE /
+        NOTIONAL rules (stablecoins show ~1.0/step and tiny min_qty). Safe to
+        call before opening a REAL position — never trade a peg with TP/SL."""
+        base = (symbol or "").split("_")[0].strip().upper()
+        if base in RealTrader.__pegged_base_cache:
+            return True
+        if self._is_blacklisted(symbol):
+            RealTrader.__pegged_base_cache.add(base)
+            return True
+        # Safety net: query symbol rules (cheap, cached) and reject anything
+        # that looks like a 1:1 token (stepSize ~ 1.0/0.0001 range with a tiny
+        # minQty is a stablecoin-style filter). Marks it so we don't re-check.
+        try:
+            rules = await self.client.get_symbol_rules(symbol)
+            step = rules.get("step_size") or 0
+            # Stablecoins peg at ~1.0 and trade in ~1-unit lots; real alts have
+            # fractional step sizes well below 1.0.
+            if step is not None and 0.5 <= step <= 1.05:
+                RealTrader.__pegged_base_cache.add(base)
+                logger.warning(f"🛡️ {symbol}: looks like a 1:1 pegged token (step={step}) — refusing REAL entry")
+                return True
+        except Exception:
+            return False
+        return False
 
     async def _in_sl_cooldown(self, session, symbol: str) -> bool:
         """Check if symbol is in SL cooldown period."""
