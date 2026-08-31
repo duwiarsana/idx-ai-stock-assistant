@@ -292,9 +292,14 @@ class RealTrader:
             highest_since_entry = price
             pos.highest_price = price
         
-        # Trailing distance: 1.2×ATR or 2% of entry, whichever is larger
+        # Trailing distance: configurable ×ATR (default loosened from the old
+        # hardcoded 1.2×ATR) or min % of entry, whichever is larger. A too-tight
+        # trailing stops out winners on the first pullback before they reach TP1.
         atr = pos.atr_value or (entry_price * 0.02)  # fallback to 2%
-        trailing_distance = max(atr * 1.2, entry_price * 0.02)
+        trailing_distance = max(
+            atr * settings.crypto_real_trailing_mult,
+            entry_price * (settings.crypto_real_trailing_min_pct / 100.0),
+        )
         
         # Trailing stop price (never below original SL)
         trailing_stop = highest_since_entry - trailing_distance

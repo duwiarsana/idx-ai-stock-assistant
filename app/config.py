@@ -172,6 +172,10 @@ class Settings(BaseSettings):
     # Max simultaneously open real positions.
     crypto_real_max_positions: int = 3
     # Min momentum score to open a real position (higher = more selective).
+    # NOTE: entry-score gating is unchanged (75); the trailing-stop loosening is
+    # the primary lever — tightening the score floor before measuring the
+    # trailing fix would drop 53% of trades without knowing whether the weak
+    # 80-84 bucket was bad entry or just a too-tight trail cutting winners.
     crypto_real_entry_score: int = 75
     # Hard safety: stop opening new positions once realized PnL (USDT) drops
     # below this threshold. 0 = disabled.
@@ -186,6 +190,15 @@ class Settings(BaseSettings):
     crypto_real_entry_min_risk_reward: float = 1.5  # minimum R:R ratio
     crypto_real_entry_max_atr_pct: float = 5.0  # max ATR% to avoid high volatility
     crypto_real_sl_cooldown_minutes: int = 180  # 3 hours cooldown after SL
+    # Trailing-stop distance multiplier (×ATR). Data review (111 closed REAL):
+    # 52 SL exits averaged only -1.24% and 5 exited while still ABOVE entry —
+    # the trailing stop was too tight (1.2×ATR) and cut winners before they
+    # could reach TP1 (+1.8%). A larger multiplier lets price breathe toward TP1
+    # instead of stopping out on the first pullback. Tune via backtest.
+    crypto_real_trailing_mult: float = 2.2
+    # Floor (×entry price) for the trailing distance, so very low-ATR coins
+    # still get a meaningful cushion. Used as max(trailing_mult*ATR, this).
+    crypto_real_trailing_min_pct: float = 2.0
     # Base symbols never traded by the real engine: stablecoins / pegged assets /
     # gold tokens / wrapped-staked assets. Their price is flat by design so TP/SL
     # levels are meaningless and taker fees guarantee a slow loss. Comma-separated
