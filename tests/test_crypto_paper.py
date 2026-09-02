@@ -53,6 +53,8 @@ def make_position(symbol="SUI_USDT", price=1.234, quote="USDT", status="OPEN"):
     p.take_profit_2 = price * 1.10
     p.stop_loss = price * 0.97
     p.entry_score = 85.0
+    p.highest_price = price
+    p.atr_value = price * 0.02
     return p
 
 
@@ -138,12 +140,14 @@ class TestEntryGate:
             cand["ai_verdict"] = {"verdict": verdict}
             assert not trader._passes_entry_gate(cand), f"should reject {verdict}"
 
-    def test_ai_filter_accepts_watch_verdicts(self, trader, monkeypatch):
+    def test_ai_filter_accepts_strong_watch_verdicts(self, trader, monkeypatch):
         from app.config import get_settings
         monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
         monkeypatch.setattr(get_settings(), "crypto_real_entry_pullback_max_pct", 3.0)
         monkeypatch.setattr(get_settings(), "crypto_paper_ai_filter_enabled", True)
-        for verdict in ("STRONG_WATCH", "WATCH"):
+        # The shared REAL entry gate only accepts STRONG_WATCH (see comment at
+        # the test below) — WATCH is rejected by passes_entry_gate itself.
+        for verdict in ("STRONG_WATCH",):
             cand = make_candidate(score=90, at_high=False)
             cand["ai_verdict"] = {"verdict": verdict}
             assert trader._passes_entry_gate(cand), f"should accept {verdict}"
@@ -181,9 +185,21 @@ class TestExitDecision:
         pos = make_position()
         assert trader._decide_exit(pos, 1.234 * 1.10) == EXIT_TP2
 
-    def test_sl_when_price_drops(self, trader):
+    def test_sl_when_price_drops(self, trader, monkeypatch):
+        from app.config import get_settings
+        monkeypatch.setattr(get_settings(), "crypto_real_sl_exit_tolerance_pct", 0.0)
         pos = make_position()
         assert trader._decide_exit(pos, 1.234 * 0.97) == EXIT_SL
+
+    def test_sl_wick_guard_holds_within_tolerance(self, trader, monkeypatch):
+        """A dip just past SL (within the wick tolerance) must NOT exit."""
+        from app.config import get_settings
+        monkeypatch.setattr(get_settings(), "crypto_real_sl_exit_tolerance_pct", 0.5)
+        pos = make_position()
+        # price exactly at SL — a single snapshot wick → hold the position.
+        assert trader._decide_exit(pos, 1.234 * 0.97) is None
+        # price genuinely below SL by more than 0.5% → exit.
+        assert trader._decide_exit(pos, 1.234 * 0.965) == EXIT_SL
 
     def test_sl_beats_tp_when_both_odd(self, trader):
         pos = make_position()

@@ -199,6 +199,18 @@ class Settings(BaseSettings):
     # Floor (×entry price) for the trailing distance, so very low-ATR coins
     # still get a meaningful cushion. Used as max(trailing_mult*ATR, this).
     crypto_real_trailing_min_pct: float = 2.0
+    # SL "wick guard": % below the effective stop-loss that price must actually
+    # trade under before the SL fires. A single ticker snapshot can print a
+    # momentary wick past SL that then recovers — executing a market sell on
+    # that print locks in a loss for no reason. With 0.5, price must be
+    # genuinely 0.5%+ UNDER the stop before we exit (real breakdowns still
+    # caught on the next 30s quick-check). 0 = disable (exit instantly).
+    crypto_real_sl_exit_tolerance_pct: float = 0.5
+    # Require a short-term (15m) recovery confirmation before entry: reject
+    # candidates whose 15m is still bearish. This stops the engine from buying
+    # a pullback that is still heading down (falling knife) — we only enter
+    # once the 15m momentum has turned up/neutral. True default.
+    crypto_real_entry_confirm_15m: bool = True
     # Base symbols never traded by the real engine: stablecoins / pegged assets /
     # gold tokens / wrapped-staked assets. Their price is flat by design so TP/SL
     # levels are meaningless and taker fees guarantee a slow loss. Comma-separated

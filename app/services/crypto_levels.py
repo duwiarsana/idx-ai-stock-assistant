@@ -14,10 +14,13 @@ from app.services.crypto_indicators import recent_high, recent_low, candles_to_c
 logger = logging.getLogger(__name__)
 
 # Multiples used to derive take-profit / stop-loss from ATR.
-# Optimised for better win rate: wider SL to avoid premature stop-outs.
-# TP1 at 2.5×ATR ensures profit covers trading fees (~0.2%).
-TP1_ATR_MULT = 2.5
-TP2_ATR_MULT = 4.0
+# Optimised for better win rate: wider SL to avoid premature stop-outs, and a
+# TP1 far enough from entry that the trailing stop (2.2×ATR) doesn't shave it
+# before it fills. TP1 = 3×ATR vs SL = 2×ATR gives R:R = 1.5, matching the
+# real-trading entry gate (CRYPTO_REAL_ENTRY_MIN_RISK_REWARD).
+# TP1 at 3×ATR ensures profit covers trading fees (~0.2%) with room to breathe.
+TP1_ATR_MULT = 3.0  # was 2.5 → TP1 further from entry = fewer premature trail cuts
+TP2_ATR_MULT = 5.0  # was 4.0 → consistent spacing above TP1
 SL_ATR_MULT = 2.0  # was 1.5 → wider SL = fewer premature stops = higher win rate
 
 

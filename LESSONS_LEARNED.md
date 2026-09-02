@@ -267,6 +267,26 @@ Aset pegged lolos filter volatilitas (ATR rendah!) — harus diblacklist eksplis
 
 ---
 
+## 12. KENAPA BOT SERING KENA SL: ENTRY PULLBACK vs EXIT YANG ASIMETRIS
+
+**Gejala (data review 111 closed REAL):** 52 exit SL rata-rata hanya -1.24%, dan 5
+di antaranya exit justru *di atas* entry. Artinya koin sering sempat naik lalu
+di-stop sebelum sempat ke TP1 (+1.8%) — bukan sinyal BUY yang salah total, tapi
+exit yang kepotong oleh noise.
+
+**Akar masalah yang diperbaiki di sesi ini:**
+
+| Masalah | Sebelum | Sesudah |
+|---------|---------|---------|
+| Paper engine pakai trailing 1.2×ATR (bug lama) padahal real sudah 2.2×ATR | paper tampak kalah lebih sering SL | paper ikut 2.2×ATR (sama dengan real) |
+| Harga lewat SL 0.0x% sekali tapi langsung market-sell di titik terendah wick | SL langsung eksekusi | wick guard `SL_EXIT_TOLERANCE_PCT=0.5` — hold, exit saat benar-benar tembus |
+| Gate entry minta R:R≥1.5 tapi breakout branch TP1=2.5×ATR & SL=2×ATR → R:R=1.25 (gagal) | kontradiksi, TP1 dekat-entry kepotong trailing | TP1=3.0×ATR & SL=2.0×ATR → R:R 1.5 konsisten |
+| Beli pullback saat 15m masih bearish (falling knife) | langsung entry | gate `ENTRY_CONFIRM_15M=true` menunggu 15m berhenti jatuh |
+
+**Pelajaran:** Mulai selalu selidiki apakah "sering SL" itu masalah *entry* atau
+*exit* — kalau kerugian SL rata-rata jauh lebih kecil dari jarak SL asli, itu
+adalah exit yang terlalu ketat, bukan entry yang salah. Ukur dulu, lalu ubah.
+
 ## File Penting yang Sering Diubah
 
 | File | Fungsi | Yang Perlu Diperhatikan |

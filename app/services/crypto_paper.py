@@ -159,17 +159,27 @@ class PaperTrader:
             highest_since_entry = price
             pos.highest_price = price
         
-        # Trailing distance: 1.2×ATR or 2% of entry, whichever is larger
+        # Trailing distance: configurable ×ATR (same as the real engine; the
+        # old hardcoded 1.2×ATR was validated too tight and cut winners before
+        # TP1 — see CRYPTO_REAL_TRAILING_MULT) or min % of entry, larger wins.
         atr = pos.atr_value or (entry_price * 0.02)  # fallback to 2%
-        trailing_distance = max(atr * 1.2, entry_price * 0.02)
+        trailing_distance = max(
+            atr * settings.crypto_real_trailing_mult,
+            entry_price * (settings.crypto_real_trailing_min_pct / 100.0),
+        )
         
         # Trailing stop price (never below original SL)
         trailing_stop = highest_since_entry - trailing_distance
         effective_sl = max(sl or trailing_stop, trailing_stop)
         
-        # Exit checks in priority order: SL first (including trailing), then TP
-        if price <= effective_sl:
-            return EXIT_SL
+        # Exit checks in priority order: SL first (including trailing), then TP.
+        # Wick guard mirrors the real engine: skip SL unless price is genuinely
+        # beyond the stop (a momentary dip then recovery shouldn't lock a loss).
+        if effective_sl and price <= effective_sl:
+            tol = settings.crypto_real_sl_exit_tolerance_pct / 100.0
+            if tol <= 0 or price < effective_sl * (1 - tol):
+                return EXIT_SL
+            return None
         if tp2 is not None and price >= tp2:
             return EXIT_TP2
         if tp1 is not None and price >= tp1:

@@ -96,6 +96,16 @@ def passes_entry_gate(c: dict) -> bool:
         if s1h.get("macd_state") != "bullish":
             return False
 
+    # Short-term confirmation: a pullback entry is only worth taking once the
+    # 15m momentum has stopped falling. Reject candidates whose 15m is still
+    # clearly bearish — otherwise we buy the middle of a dip that keeps going
+    # down and the SL (just below recent low) gets hit as routine.
+    if settings.crypto_real_entry_confirm_15m:
+        s15 = (c.get("tf_summaries") or {}).get("15m") or {}
+        if s15.get("trend") == "bearish" or s15.get("macd_state") == "bearish":
+            logger.debug(f"🚫 {symbol}: 15m still bearish — waiting for recovery")
+            return False
+
     if settings.crypto_real_entry_require_breakout:
         if not s1h.get("at_high"):
             return False
@@ -305,9 +315,21 @@ class RealTrader:
         trailing_stop = highest_since_entry - trailing_distance
         effective_sl = max(sl or trailing_stop, trailing_stop)
         
-        # Exit checks in priority order: SL first (including trailing), then TP
-        if price <= effective_sl:
-            return EXIT_SL
+        # Exit checks in priority order: SL first (including trailing), then TP.
+        # SL wick guard: tolerate a small overshoot past the stop on a single
+        # ticker snapshot. A momentary wick below SL that recovers should not
+        # force a market sell at the bottom — exit only when price is genuinely
+        # beyond the level by more than the configured tolerance. Real
+        # breakdowns are still caught by the next 30s quick-check.
+        if effective_sl and price <= effective_sl:
+            tol = settings.crypto_real_sl_exit_tolerance_pct / 100.0
+            if tol <= 0 or price < effective_sl * (1 - tol):
+                return EXIT_SL
+            logger.debug(
+                f"⏳ {pos.symbol}: price={price:.6f} within {tol*100:.1f}% of SL "
+                f"{effective_sl:.6f} — holding for recovery (wick guard)"
+            )
+            return None
         if tp2 is not None and price >= tp2:
             # Slippage guard: if price dropped >1% from TP level, skip sell
             # (wait for recovery or let it hit SL instead of selling into weakness)
