@@ -282,6 +282,7 @@ exit yang kepotong oleh noise.
 | Harga lewat SL 0.0x% sekali tapi langsung market-sell di titik terendah wick | SL langsung eksekusi | wick guard `SL_EXIT_TOLERANCE_PCT=0.5` — hold, exit saat benar-benar tembus |
 | Gate entry minta R:R≥1.5 tapi breakout branch TP1=2.5×ATR & SL=2×ATR → R:R=1.25 (gagal) | kontradiksi, TP1 dekat-entry kepotong trailing | TP1=3.0×ATR & SL=2.0×ATR → R:R 1.5 konsisten |
 | Beli pullback saat 15m masih bearish (falling knife) | langsung entry | gate `ENTRY_CONFIRM_15M=true` menunggu 15m berhenti jatuh |
+| Paper SL exit membukukan `stop_loss` dasar (bukan harga yang memicu) | paper rugi -5.38% rata-rata vs real -1.31% (dihitung overstate) | paper SL membukukan harga trigger, mirror fill real |
 
 **Pelajaran:** Mulai selalu selidiki apakah "sering SL" itu masalah *entry* atau
 *exit* — kalau kerugian SL rata-rata jauh lebih kecil dari jarak SL asli, itu

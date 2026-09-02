@@ -193,11 +193,19 @@ class PaperTrader:
         if qty <= 0:
             return
 
-        exit_price = {
-            EXIT_SL: pos.stop_loss,
-            EXIT_TP2: pos.take_profit_2,
-            EXIT_TP1: pos.take_profit_1,
-        }.get(action) or price
+        if action == EXIT_SL:
+            # SL is a market-style exit: book the ACTUAL triggering price (the
+            # ticker snapshot that broke the stop), NOT the static base
+            # stop_loss level. The effective stop can be a trailing stop well
+            # ABOVE the base SL — booking the base SL inflates the simulated
+            # loss, and the real engine books its actual market fill. Mirroring
+            # that keeps paper PnL honest vs real PnL.
+            exit_price = price or pos.stop_loss
+        else:
+            exit_price = {
+                EXIT_TP2: pos.take_profit_2,
+                EXIT_TP1: pos.take_profit_1,
+            }.get(action) or price
 
         proceeds = qty * exit_price
         cost_basis = (qty / (pos.quantity or qty)) * (pos.invested or 0.0) if pos.quantity else 0

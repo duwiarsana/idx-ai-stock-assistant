@@ -258,6 +258,11 @@ class TestClosePosition:
             assert trade.side == expected_side
             assert pos.status == "CLOSED"
             assert pos.exit_reason == action
+            if action == EXIT_SL:
+                # SL is a market-style exit: book the TRIGGER price (1.20), not
+                # the static base stop_loss (1.198). This mirrors the real
+                # engine's market fill so paper PnL matches reality.
+                assert trade.price == 1.20
 
 
 class TestPriceLookup:
