@@ -28,6 +28,13 @@ settings = get_settings()
 FIAT_AND_QUOTE = {"IDR", "USDT"}
 
 
+def _html_escape(text: str) -> str:
+    """Escape HTML-sensitive chars so Telegram HTML parser never breaks."""
+    return (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+
+
 @dataclass
 class AssetHolding:
     """One wallet asset with its price lookup result and computed value."""
@@ -47,9 +54,10 @@ class AssetHolding:
         # Avoid scientific notation for tiny balances (9.04e-06 reads badly
         # on Telegram; plain decimals with up to 8 dp stay legible).
         qty_str = f"{self.quantity:.8f}".rstrip("0").rstrip(".") or "0"
+        asset = _html_escape(self.asset)
         if self.value is not None:
-            return f"• {self.asset}: {qty_str} ≈ {self.value:.2f} USDT"
-        return f"• {self.asset}: {qty_str} (harga tidak tersedia)"
+            return f"• {asset}: {qty_str} ≈ {self.value:.2f} USDT"
+        return f"• {asset}: {qty_str} (harga tidak tersedia)"
 
 
 @dataclass
@@ -132,20 +140,20 @@ def parse_blacklist(raw: str) -> set[str]:
 
 def format_dust_message(report: DustReport, max_items: int = 15) -> str:
     """Build the Telegram report text from a classification result."""
-    text = "🔎 *DUST REPORT — Wallet Tokocrypto*\n\n"
+    text = "🔎 <b>DUST REPORT — Wallet Tokocrypto</b>\n\n"
 
     if report.active:
-        text += "📍 *Posisi aktif (dipakai bot):*\n"
+        text += "📍 <b>Posisi aktif (dipakai bot):</b>\n"
         for h in report.active:
             text += f"{h.line()}\n"
         text += "\n"
 
     if report.dust:
         total = report.dust_total
-        text += f"🧹 *Dust: {len(report.dust)} aset"
+        text += f"🧹 <b>Dust: {len(report.dust)} aset"
         if report.prices_available:
             text += f" ≈ {total:.2f} USDT"
-        text += "*\n"
+        text += "</b>\n"
         shown = report.dust[:max_items]
         for h in shown:
             line = h.line()
@@ -155,20 +163,20 @@ def format_dust_message(report: DustReport, max_items: int = 15) -> str:
         if len(report.dust) > len(shown):
             text += f"• … dan {len(report.dust) - len(shown)} aset lainnya\n"
         text += (
-            "\n💤 Dust di bawah min_notional bursa (5 USDT) *tidak bisa dijual*"
+            "\n💤 Dust di bawah min_notional bursa (5 USDT) <b>tidak bisa dijual</b>"
             " lewat order biasa.\n"
-            "👉 Pakai fitur *Convert Small Balance* di aplikasi Tokocrypto"
+            "👉 Pakai fitur <b>Convert Small Balance</b> di aplikasi Tokocrypto"
             " untuk mengubah semuanya jadi USDT.\n"
         )
     else:
-        text += "🧹 *Dust: kosong — wallet bersih!*\n"
+        text += "🧹 <b>Dust: kosong — wallet bersih!</b>\n"
 
     if report.sellable:
-        text += "\n💱 *Masih bisa dijual manual (≥ 5 USDT):*\n"
+        text += "\n💱 <b>Masih bisa dijual manual (≥ 5 USDT):</b>\n"
         for h in report.sellable:
             text += f"{h.line()}\n"
 
-    text += "\n🔍 _Read-only report — bot tidak pernah menempatkan order._"
+    text += "\n🔍 <i>Read-only report — bot tidak pernah menempatkan order.</i>"
     return text
 
 
@@ -230,7 +238,7 @@ async def _send_telegram(text: str) -> bool:
 
         bot = Bot(token=settings.telegram_bot_token)
         await bot.send_message(
-            chat_id=chat_id, text=text, parse_mode="Markdown"
+            chat_id=chat_id, text=text, parse_mode="HTML"
         )
         return True
     except Exception as e:
