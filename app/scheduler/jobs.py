@@ -482,6 +482,18 @@ async def crypto_real_tp_sl_check():
         logger.error(f"Crypto real TP/SL check failed: {e}", exc_info=True)
 
 
+async def weekly_dust_report_job():
+    """Report leftover wallet balances (dust) to Telegram (read-only)."""
+    if not settings.crypto_dust_report_enabled:
+        logger.info("⏭️ Dust report disabled, skipping job")
+        return
+    try:
+        from app.services.crypto_dust import run_dust_report
+        await run_dust_report(notify=True)
+    except Exception as e:
+        logger.exception(f"Dust report job raised: {e}")
+
+
 def create_scheduler() -> AsyncIOScheduler:
     """Create and configure the job scheduler."""
     logger.debug("create_scheduler() started")
@@ -568,6 +580,24 @@ def create_scheduler() -> AsyncIOScheduler:
         name="Daily Cleanup",
         replace_existing=True,
     )
+
+    # Weekly dust report (read-only wallet inventory)
+    try:
+        scheduler.add_job(
+            weekly_dust_report_job,
+            CronTrigger(
+                day_of_week=settings.crypto_dust_report_day,
+                hour=settings.crypto_dust_report_hour,
+                minute=0,
+                timezone="Asia/Jakarta",
+            ),
+            id="weekly_dust_report",
+            name="Weekly Dust Report",
+            replace_existing=True,
+        )
+        logger.debug("weekly_dust_report scheduled")
+    except Exception as e:
+        logger.error(f"Error scheduling weekly_dust_report: {e}")
 
     # Crypto scanner (Tokocrypto) — interval based, enabled via config
     if settings.crypto_scanner_enabled:

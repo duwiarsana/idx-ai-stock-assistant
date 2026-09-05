@@ -220,6 +220,17 @@ class Settings(BaseSettings):
         "U,RLUSD,PAXG,XAUT,WBETH,BNSOL,WBTC,WETH,WBNB,STETH,WSTETH,RETH,CBETH"
     )
 
+    # ── Crypto Dust Report ────────────────────────────
+    # Weekly read-only wallet inventory. Dust = balances below the exchange
+    # minimum notional that can never be sold individually (fee leftovers,
+    # old SL_DUST positions, pegged assets bought before the blacklist).
+    # The report only lists them and points to the exchange's
+    # "Convert Small Balance" feature — it never places orders.
+    crypto_dust_report_enabled: bool = True
+    # CronTrigger day_of_week (mon..sun) and hour in WIB.
+    crypto_dust_report_day: str = "sun"
+    crypto_dust_report_hour: int = 8
+
     # ── IDX Intraday Alerts ───────────────────────────
     # Alert gate for the hourly intraday scanner (09:00-15:00 WIB, Mon-Fri).
     # A loose gate (score>=55) produced 100+ alerts/hour — everything looked
