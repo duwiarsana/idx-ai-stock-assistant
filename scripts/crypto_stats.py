@@ -16,18 +16,28 @@ Requires DB access via app config (run on the VPS / inside the bot container).
 import argparse
 import asyncio
 import csv
+import logging
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.db.session import async_session_factory
 from app.models.crypto import CryptoPaperPosition
 
 STATUS_CLOSED = "CLOSED"
+logger = logging.getLogger("crypto_stats")
+
+# Alert thresholds (watch mode). Fires a Telegram alarm when REAL performance
+# degrades vs the pre-change baseline; tuned so tiny samples don't spam.
+MIN_TRADES_TO_JUDGE = 3      # below this, don't conclude anything
+MIN_TRADES_STRONG = 7        # sample large enough to judge win rate too
+EXPECTANCY_DROP_FACTOR = 0.5  # recent exp below 50% of baseline → alert
 
 
 def _summarize(rows: list) -> dict:
@@ -65,6 +75,54 @@ def _fmt(s: dict) -> str:
     )
 
 
+def _watch_alert(baseline: dict, since_change: dict, recent_7d: dict) -> Optional[str]:
+    """Build a Telegram alert when REAL expectancy collapses vs baseline.
+    Returns None when things are healthy (or sample too small to tell)."""
+    b_exp = baseline["expectancy"]
+    warns = []
+    for label, s in (("sejak perubahan (12-Sep)", since_change), ("7 hari terakhir", recent_7d)):
+        if s["trades"] < MIN_TRADES_TO_JUDGE:
+            continue
+        if s["expectancy"] < 0:
+            warns.append(
+                f"🔴 expectancy {label} NEGATIF: {s['expectancy']:+.4f} USDT/trade (n={s['trades']})")
+        elif b_exp > 0 and s["expectancy"] < b_exp * EXPECTANCY_DROP_FACTOR:
+            warns.append(
+                f"🟠 expectancy {label} jauh di bawah baseline: {s['expectancy']:+.4f} "
+                f"vs baseline {b_exp:+.4f} (n={s['trades']})")
+        if s["trades"] >= MIN_TRADES_STRONG and s["win_rate"] < 40.0:
+            warns.append(
+                f"🟠 win rate {label} rendah: {s['win_rate']:.1f}% (n={s['trades']})")
+    if not warns:
+        return None
+    body = "\n".join(f"• {w}" for w in warns)
+    return (
+        "🚨 <b>CRYPTO REAL — PERFORMANCE ALERT</b>\n"
+        f"Baseline (7 hari sebelum SL 3×ATR): exp {b_exp:+.4f} USDT/trade, "
+        f"WR {baseline['win_rate']:.1f}%, n={baseline['trades']}\n"
+        f"{body}\n\n"
+        "Cek detail: <code>python scripts/crypto_stats.py</code>"
+    )
+
+
+async def _send_telegram(text: str) -> bool:
+    settings = get_settings()
+    chat_id = settings.telegram_chat_id or settings.telegram_admin_id
+    if not settings.telegram_bot_token or not chat_id:
+        logger.warning("Watch alert: Telegram not configured, skipping send")
+        return False
+    try:
+        from telegram import Bot
+
+        await Bot(token=settings.telegram_bot_token).send_message(
+            chat_id=chat_id, text=text, parse_mode="HTML"
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"Watch alert Telegram send failed: {e}")
+        return False
+
+
 async def _load_since(session, since: datetime) -> list:
     rows = []
     res = await session.execute(
@@ -87,6 +145,8 @@ async def main() -> None:
                              "(the SL 2.0→3.0 deploy).")
     parser.add_argument("--history", action="store_true",
                         help="Append today's REAL/PAPER snapshot to data/crypto_stats_history.csv")
+    parser.add_argument("--watch", action="store_true",
+                        help="Send a Telegram alert if REAL expectancy collapses vs baseline")
     args = parser.parse_args()
 
     baseline = datetime(2026, 9, 12, tzinfo=timezone.utc) if not args.baseline else \
@@ -102,6 +162,7 @@ async def main() -> None:
         print("=" * 78)
 
         since = baseline - timedelta(days=7)
+        recent_cut = today - timedelta(days=7)
         for mode in ("REAL", "PAPER"):
             before = [r for r in all_rows if r[0] == mode and since <= r[3] < baseline]
             after = [r for r in all_rows if r[0] == mode and r[3] >= baseline]
@@ -109,6 +170,19 @@ async def main() -> None:
             print(f"    {_fmt(_summarize(before))}")
             print(f"[{mode}]  after  {baseline:%d-%b}→now:")
             print(f"    {_fmt(_summarize(after))}")
+
+        base_s = _summarize([r for r in all_rows if r[0] == "REAL" and since <= r[3] < baseline])
+        after_s = _summarize([r for r in all_rows if r[0] == "REAL" and r[3] >= baseline])
+        recent_s = _summarize([r for r in all_rows if r[0] == "REAL" and r[3] >= recent_cut])
+
+        if args.watch:
+            alert = _watch_alert(base_s, after_s, recent_s)
+            if alert:
+                print(f"\n→ Sending Telegram watch alert:\n{alert}")
+                ok = await _send_telegram(alert)
+                print(f"→ sent={ok}")
+            else:
+                print("\n→ Watch: REAL healthy (or sample too small) — no alert.")
 
         if args.history:
             out_path = Path(__file__).parent.parent / "data" / "crypto_stats_history.csv"
