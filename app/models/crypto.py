@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, func
+from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Boolean, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -89,6 +89,10 @@ class CryptoPaperPosition(Base, TimestampMixin):
     # Trailing stop state (persisted to survive restarts)
     highest_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     atr_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # First TP1 fill already booked (partial exit). When True the remaining
+    # quantity rides the trailing stop toward TP2 instead of being sold at TP1.
+    tp1_partial_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     exit_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # TP1 / TP2 / SL / MANUAL

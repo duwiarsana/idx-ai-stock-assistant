@@ -211,12 +211,12 @@ class TestExitDecision:
 
 class TestClosePosition:
     @pytest.mark.asyncio
-    async def test_close_via_each_action_no_keyerror(self, trader, monkeypatch):
-        """Closing via TP1/TP2/SL must not raise KeyError on the side mapping."""
+    async def test_close_via_tp2_and_sl_no_keyerror(self, trader, monkeypatch):
+        """Closing via TP2/SL records the side and marks the position CLOSED."""
         from app.services.crypto_paper import (
-            EXIT_TP1, EXIT_TP2, EXIT_SL, SIDE_SELL_TP1, SIDE_SELL_TP2, SIDE_SELL_SL,
+            EXIT_TP2, EXIT_SL, SIDE_SELL_TP2, SIDE_SELL_SL,
         )
-        from app.models.crypto import CryptoPaperPosition, CryptoPaperTrade
+        from app.models.crypto import CryptoPaperTrade
 
         monkeypatch.setattr("app.services.crypto_paper.settings.crypto_paper_notify", False)
 
@@ -237,7 +237,6 @@ class TestClosePosition:
                 pass
 
         for action, expected_side in (
-            (EXIT_TP1, SIDE_SELL_TP1),
             (EXIT_TP2, SIDE_SELL_TP2),
             (EXIT_SL, SIDE_SELL_SL),
         ):
@@ -258,11 +257,104 @@ class TestClosePosition:
             assert trade.side == expected_side
             assert pos.status == "CLOSED"
             assert pos.exit_reason == action
+            assert pos.quantity == 10.0  # full sell
             if action == EXIT_SL:
                 # SL is a market-style exit: book the TRIGGER price (1.20), not
                 # the static base stop_loss (1.198). This mirrors the real
                 # engine's market fill so paper PnL matches reality.
                 assert trade.price == 1.20
+
+    @pytest.mark.asyncio
+    async def test_tp1_is_partial_sell_and_position_stays_open(self, trader, monkeypatch):
+        """TP1 (first fill) sells only the configured % and the position stays
+        OPEN to ride toward TP2."""
+        from app.services.crypto_paper import EXIT_TP1, SIDE_SELL_TP1
+        from app.models.crypto import CryptoPaperTrade
+
+        from app.config import get_settings
+        monkeypatch.setattr(get_settings(), "crypto_paper_sell_pct_at_tp1", 50.0)
+        monkeypatch.setattr("app.services.crypto_paper.settings.crypto_paper_notify", False)
+
+        class Account:
+            quote_asset = "USDT"
+            cash_balance = 10000.0
+            realized_pnl = 0.0
+            total_trades = 0
+            winning_trades = 0
+
+        class FakeSession:
+            def __init__(self):
+                self.added = []
+            def add(self, obj):
+                self.added.append(obj)
+            async def flush(self):
+                pass
+
+        session = FakeSession()
+        pos = make_position()  # qty=10, invested=12.34
+        pos.id = 5
+        account = Account()
+
+        result = await trader._close_position(session, pos, account, EXIT_TP1, 1.30)
+
+        trade = next(o for o in session.added if isinstance(o, CryptoPaperTrade))
+        assert result == "partial"
+        assert trade.side == SIDE_SELL_TP1
+        assert trade.quantity == pytest.approx(5.0)
+        assert pos.status == "OPEN"                   # still open after partial
+        assert pos.tp1_partial_done is True
+        assert pos.quantity == pytest.approx(5.0)      # remaining quantity
+        assert pos.invested == pytest.approx(12.34 / 2)
+        assert account.cash_balance == pytest.approx(10000.0 + 5.0 * 1.2957)
+
+    @pytest.mark.asyncio
+    async def test_tp1_again_after_partial_does_not_sell(self, trader, monkeypatch):
+        """Once TP1 is partially booked, a later TP1 touch must NOT sell again —
+        the rider is reserved for TP2 / the trailing stop."""
+        from app.services.crypto_paper import EXIT_TP1
+        pos = make_position()
+        pos.tp1_partial_done = True
+        assert trader._decide_exit(pos, 1.234 * 1.05) is None
+
+    @pytest.mark.asyncio
+    async def test_tp1_partial_then_rider_closes_at_tp2(self, trader, monkeypatch):
+        """Remainder after a partial TP1 still closes fully at TP2."""
+        from app.services.crypto_paper import EXIT_TP1, EXIT_TP2, SIDE_SELL_TP1, SIDE_SELL_TP2
+        from app.models.crypto import CryptoPaperTrade
+        from app.config import get_settings
+        monkeypatch.setattr(get_settings(), "crypto_paper_sell_pct_at_tp1", 50.0)
+        monkeypatch.setattr("app.services.crypto_paper.settings.crypto_paper_notify", False)
+
+        class Account:
+            quote_asset = "USDT"
+            cash_balance = 10000.0
+            realized_pnl = 0.0
+            total_trades = 0
+            winning_trades = 0
+
+        class FakeSession:
+            def __init__(self):
+                self.added = []
+            def add(self, obj):
+                self.added.append(obj)
+            async def flush(self):
+                pass
+
+        session = FakeSession()
+        pos = make_position()  # qty=10, TP1=1.2957, TP2=1.3574
+        pos.id = 7
+        account = Account()
+
+        assert await trader._close_position(session, pos, account, EXIT_TP1, 1.30) == "partial"
+        # Rider reaches TP2 → full close on the remaining 5.
+        assert await trader._close_position(session, pos, account, EXIT_TP2, 1.36) != "partial"
+
+        sides = [o.side for o in session.added if isinstance(o, CryptoPaperTrade)]
+        assert sides == [SIDE_SELL_TP1, SIDE_SELL_TP2]
+        assert pos.status == "CLOSED"
+        assert pos.exit_reason == EXIT_TP2
+        assert pos.quantity == pytest.approx(5.0)  # remaining qty at final close
+        assert account.total_trades == 2
 
 
 class TestPriceLookup:

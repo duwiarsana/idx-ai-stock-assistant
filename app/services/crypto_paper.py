@@ -132,8 +132,14 @@ class PaperTrader:
                     continue
 
                 account = await self._get_or_create_account(session, pos.quote)
-                await self._close_position(session, pos, account, action, price)
-                closed += 1
+                result = await self._close_position(session, pos, account, action, price)
+                if result == "partial":
+                    logger.info(
+                        f"⚖️ Paper {pos.display or pos.symbol}: partial TP1 filled, "
+                        f"remaining {pos.quantity:.6f} rides to TP2"
+                    )
+                else:
+                    closed += 1
             except Exception as e:
                 logger.warning(f"Paper exit error for {pos.symbol}: {e}")
 
@@ -182,16 +188,23 @@ class PaperTrader:
             return None
         if tp2 is not None and price >= tp2:
             return EXIT_TP2
-        if tp1 is not None and price >= tp1:
+        # TP1 partial already booked? Then don't sell the rider at TP1 again —
+        # hold it for TP2 / the trailing stop instead.
+        if tp1 is not None and price >= tp1 and not getattr(pos, "tp1_partial_done", False):
             return EXIT_TP1
         return None
 
-    async def _close_position(self, session, pos, account, action: str, price: float) -> None:
+    async def _close_position(self, session, pos, account, action: str, price: float):
+        """Fully close a position, or do a partial TP1 fill.
+
+        Returns ``"partial"`` when only the TP1 slice was sold (position stays
+        OPEN, remainder rides to TP2), ``None`` otherwise (full close / no-op).
+        """
         from app.models.crypto import CryptoPaperTrade
 
         qty = pos.quantity or 0.0
         if qty <= 0:
-            return
+            return None
 
         if action == EXIT_SL:
             # SL is a market-style exit: book the ACTUAL triggering price (the
@@ -201,14 +214,29 @@ class PaperTrader:
             # loss, and the real engine books its actual market fill. Mirroring
             # that keeps paper PnL honest vs real PnL.
             exit_price = price or pos.stop_loss
+            sell_qty = qty
+            partial = False
         else:
+            partial = (
+                action == EXIT_TP1
+                and not getattr(pos, "tp1_partial_done", False)
+            )
+            if partial:
+                pct = getattr(settings, "crypto_paper_sell_pct_at_tp1", 0.0) or 100.0
+                sell_qty = qty * pct / 100.0
+                partial = 0.0 < sell_qty < qty
+                if not partial:
+                    sell_qty = qty
+            else:
+                sell_qty = qty
             exit_price = {
                 EXIT_TP2: pos.take_profit_2,
                 EXIT_TP1: pos.take_profit_1,
             }.get(action) or price
 
-        proceeds = qty * exit_price
-        cost_basis = (qty / (pos.quantity or qty)) * (pos.invested or 0.0) if pos.quantity else 0
+        proceeds = sell_qty * exit_price
+        # PnL proportional to the SOLD quantity, never the full invested amount.
+        cost_basis = (sell_qty / qty) * (pos.invested or 0.0)
         pnl = proceeds - cost_basis
 
         session.add(CryptoPaperTrade(
@@ -216,7 +244,7 @@ class PaperTrader:
             symbol=pos.symbol,
             side={EXIT_TP1: SIDE_SELL_TP1, EXIT_TP2: SIDE_SELL_TP2, EXIT_SL: SIDE_SELL_SL}[action],
             price=exit_price,
-            quantity=qty,
+            quantity=sell_qty,
             quote_amount=proceeds,
             realized_pnl=pnl,
         ))
@@ -226,6 +254,20 @@ class PaperTrader:
         account.total_trades += 1
         if pnl > 0:
             account.winning_trades += 1
+
+        if partial:
+            # Partial TP1: shrink the position, mark it, keep it OPEN so the
+            # remaining quantity can ride to TP2 or the trailing stop.
+            pos.quantity = round(qty - sell_qty, 12)
+            pos.invested = max(0.0, (pos.invested or 0.0) - cost_basis)
+            pos.tp1_partial_done = True
+            logger.info(
+                f"⚖️ Paper partial TP1 {pos.display or pos.symbol}: sold {sell_qty:.6f} "
+                f"@ {exit_price} pnl={pnl:+.4f} {pos.quote}; {pos.quantity:.6f} left"
+            )
+            if settings.crypto_paper_notify:
+                await self._notify_partial_tp1(pos, exit_price, pnl, sell_qty)
+            return "partial"
 
         pos.status = STATUS_CLOSED
         pos.exit_price = exit_price
@@ -522,6 +564,19 @@ class PaperTrader:
             text += "⚠️ *RUGI.*\n"
         text += self._account_summary_text(account)
         text += "\n_Signal monitoring only, not financial advice._"
+        await self._send_telegram(text)
+
+    async def _notify_partial_tp1(self, pos, exit_price: float, pnl: float, qty_sold: float) -> None:
+        pnl_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price else 0
+        pnl_str = f"{pnl:+.4f}" if abs(pnl) < 1 else f"{pnl:+.2f}"
+        text = (
+            f"⚖️ *PAPER PARTIAL TP1* (simulasi)\n\n"
+            f"🔹 {pos.display or pos.symbol}\n"
+            f"💵 Entry: {_fmt_price(pos.entry_price)} {pos.quote}\n"
+            f"🏁 Jual {qty_sold:.6f} @ {_fmt_price(exit_price)} {pos.quote}\n"
+            f"💹 PnL: **{pnl_str} {pos.quote}** ({pnl_pct:+.2f}%)\n"
+            f"📦 Sisa {pos.quantity:.6f} lanjut ke TP2/trailing.\n"
+        )
         await self._send_telegram(text)
 
     @staticmethod

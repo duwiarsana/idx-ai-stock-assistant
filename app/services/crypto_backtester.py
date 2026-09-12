@@ -47,6 +47,7 @@ class BacktestParams:
     tp2_mult: float = TP2_ATR_MULT
     sl_mult: float = SL_ATR_MULT
     cooldown_bars: int = 2  # 2 x 1h bars ~= the 120-min live cooldown
+    partial_tp1_pct: float = 50.0  # % sold at TP1; remainder rides to TP2/trailing stop
 
 
 @dataclass
@@ -111,9 +112,11 @@ class BacktestResult:
             "total_return_pct": round((equity - 1) * 100, 2),
             "max_drawdown_pct": round(max_dd, 2),
             "avg_bars_held": round(sum(t.bars_held for t in self.trades) / self.n_trades, 1),
-            "tp1": sum(1 for t in self.trades if t.exit_reason == "TP1"),
-            "tp2": sum(1 for t in self.trades if t.exit_reason == "TP2"),
-            "sl": sum(1 for t in self.trades if t.exit_reason == "SL"),
+            # Substring match so combined reasons (TP1+TP2, TP1+SL) count the
+            # legs they contain — mirrors how a partial-TP1 trade touches both.
+            "tp1": sum(1 for t in self.trades if "TP1" in t.exit_reason),
+            "tp2": sum(1 for t in self.trades if "TP2" in t.exit_reason),
+            "sl": sum(1 for t in self.trades if "SL" in t.exit_reason),
         }
 
 
@@ -275,36 +278,68 @@ class CryptoBacktester:
                 exit_price = None
                 exit_15m_idx = None
                 highest_price = entry_price  # for trailing stop logic
+                # Partial TP1 mirrors the live engine: sell `partial_tp1_pct`
+                # at TP1 and let the remainder ride to TP2 / the trailing stop.
+                # Combined trades keep a single record with a WEIGHTED exit price
+                # (pct×TP1 + remainder×rider) so pnl_pct stays consistent.
+                pct_tp1 = p.partial_tp1_pct if p.partial_tp1_pct is not None else 0.0
+                pct_tp1 = max(0.0, min(100.0, pct_tp1))
+                rider_pct = (100.0 - pct_tp1) / 100.0
+                partial_tp1 = 0.0 < pct_tp1 < 100.0
+                tp1_leg_price = None
+                atr = entry_price * 0.02  # approximate ATR (backtester has no live ATR)
+                settings = get_settings()
+                trailing_mult = getattr(settings, "crypto_real_trailing_mult", 2.2) or 2.2
+                trailing_min_pct = getattr(settings, "crypto_real_trailing_min_pct", 2.0) or 2.0
                 for j, bar in enumerate(c15):
                     if bar["openTime"] < entry_ts:
                         continue
-                    
+
                     # Track highest price for potential trailing stop
                     if bar["high"] > highest_price:
                         highest_price = bar["high"]
-                    
-                    # Trailing stop: 1.2×ATR below highest (mimics paper trading)
-                    atr = (entry_price * 0.02)  # approximate ATR
-                    trailing_stop = highest_price - (atr * 1.2)
+
+                    # Trailing stop below highest (mirrors live engine).
+                    trailing_stop = highest_price - max(atr * trailing_mult,
+                                                       entry_price * trailing_min_pct / 100.0)
                     effective_sl = max(sl, trailing_stop)
-                    
-                    # Check exits in priority: SL first (with slippage), then TP
+
+                    # Check exits: SL first (with slippage), then TP2, then TP1 —
+                    # same priority as the live _decide_exit.
                     if bar["low"] <= effective_sl:
                         # SL hit with 0.1% slippage (realistic in volatile market)
                         slippage = entry_price * 0.001
-                        exit_reason, exit_price, exit_15m_idx = "SL", max(sl - slippage, bar["low"]), j
+                        sl_price = max(sl - slippage, bar["low"])
+                        if tp1_leg_price is not None:
+                            exit_reason, exit_price, exit_15m_idx = (
+                                "TP1+SL", (pct_tp1 / 100.0) * tp1_leg_price + rider_pct * sl_price, j)
+                        else:
+                            exit_reason, exit_price, exit_15m_idx = "SL", sl_price, j
                         break
                     if bar["high"] >= tp2:
-                        exit_reason, exit_price, exit_15m_idx = "TP2", tp2, j
+                        if tp1_leg_price is not None:
+                            exit_reason, exit_price, exit_15m_idx = (
+                                "TP1+TP2", (pct_tp1 / 100.0) * tp1_leg_price + rider_pct * tp2, j)
+                        else:
+                            exit_reason, exit_price, exit_15m_idx = "TP2", tp2, j
                         break
                     if bar["high"] >= tp1:
+                        if partial_tp1:
+                            tp1_leg_price = tp1  # book the slice, keep riding
+                            continue
                         exit_reason, exit_price, exit_15m_idx = "TP1", tp1, j
                         break
 
                 if exit_15m_idx is None:
-                    exit_price = c15[-1]["close"]
-                    exit_reason = "END"
-                    exit_15m_idx = len(c15) - 1
+                    if tp1_leg_price is not None:
+                        last_close = c15[-1]["close"]
+                        exit_reason = "TP1+END"
+                        exit_price = (pct_tp1 / 100.0) * tp1_leg_price + rider_pct * last_close
+                        exit_15m_idx = len(c15) - 1
+                    else:
+                        exit_price = c15[-1]["close"]
+                        exit_reason = "END"
+                        exit_15m_idx = len(c15) - 1
 
                 pnl_pct = (exit_price - entry_price) / entry_price * 100.0
                 exit_time = datetime.fromtimestamp(c15[exit_15m_idx]["openTime"] / 1000, tz=timezone.utc)
@@ -403,6 +438,7 @@ async def run_backtest(args) -> None:
     params = BacktestParams(
         entry_score=args.entry_score,
         pullback_max_pct=args.pullback,
+        partial_tp1_pct=args.partial_tp1,
     )
     backtester = CryptoBacktester(client=client, params=params)
 
@@ -461,6 +497,8 @@ def main() -> None:
     parser.add_argument("--top", type=int, default=15)
     parser.add_argument("--entry-score", type=float, default=80.0)
     parser.add_argument("--pullback", type=float, default=3.0)
+    parser.add_argument("--partial-tp1", type=float, default=50.0,
+                        help="%% of position sold at TP1 (remainder rides to TP2); 0/100 = legacy full close")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")

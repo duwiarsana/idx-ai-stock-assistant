@@ -231,8 +231,12 @@ class RealTrader:
                 
                 logger.info(f"🎯 {pos.symbol}: Exit signal = {action} at price {price:.6f}")
                 account = await self._get_or_create_account(session, pos.quote)
-                ok = await self._close_position(session, pos, account, action, price)
-                if ok:
+                result = await self._close_position(session, pos, account, action, price)
+                if result == "partial":
+                    logger.info(
+                        f"⚖️ {pos.symbol}: partial TP1 filled, remaining {pos.quantity:.6f} rides to TP2"
+                    )
+                elif result:
                     closed += 1
                     logger.info(f"✅ {pos.symbol}: Closed successfully ({action})")
             except Exception as e:
@@ -260,6 +264,7 @@ class RealTrader:
             return 0
         
         closed = 0
+        progress = False
         for pos in positions:
             try:
                 price = await self._fetch_price_from_symbol(pos.symbol, pos.quote)
@@ -276,16 +281,24 @@ class RealTrader:
                 if action is not None:
                     logger.info(f"⚡ {pos.symbol}: Quick TP/SL exit = {action} at {price:.6f}")
                     account = await self._get_or_create_account(session, pos.quote)
-                    ok = await self._close_position(session, pos, account, action, price)
-                    if ok:
+                    result = await self._close_position(session, pos, account, action, price)
+                    if result == "partial":
+                        progress = True
+                        logger.info(
+                            f"⚖️ {pos.symbol}: Quick partial TP1 filled, "
+                            f"remaining {pos.quantity:.6f} rides to TP2"
+                        )
+                    elif result:
                         closed += 1
+                        progress = True
                         logger.info(f"✅ {pos.symbol}: Quick exit successful ({action})")
             except Exception as e:
                 logger.warning(f"⚡ {pos.symbol}: Quick exit error: {e}")
         
-        if closed > 0:
+        if progress:
             await session.commit()
-            logger.info(f"⚡ Quick TP/SL check: {closed} positions closed and committed")
+            if closed > 0:
+                logger.info(f"⚡ Quick TP/SL check: {closed} positions closed and committed")
         
         return closed
 
@@ -341,7 +354,9 @@ class RealTrader:
                 )
                 return None
             return EXIT_TP2
-        if tp1 is not None and price >= tp1:
+        # TP1 already partially filled? Don't sell the rider at TP1 again —
+        # hold it for TP2 / the trailing stop.
+        if tp1 is not None and price >= tp1 and not getattr(pos, "tp1_partial_done", False):
             slippage_pct = (tp1 - price) / tp1 * 100
             if slippage_pct > 1.0:
                 logger.debug(
@@ -390,6 +405,35 @@ class RealTrader:
                 f"LOT_SIZE step ({step}) — position too small to sell."
             )
             return False
+
+        # ── Partial TP1 ───────────────────────────────────────────────
+        # When TP1 fires for the first time, only sell a slice (default 50%)
+        # and let the rest ride toward TP2 / the trailing stop. The old engine
+        # dumped 100% at TP1 so TP2 (avg +0.55 USDT vs TP1 +0.08) was almost
+        # never reached. Partial TP1 is only feasible when BOTH the sold slice
+        # AND the leftover sit above the exchange NOTIONAL minimum — otherwise
+        # we fall back to the legacy full close (small positions can't spit).
+        partial_sell = False
+        if action == EXIT_TP1 and not getattr(pos, "tp1_partial_done", False):
+            pct = getattr(settings, "crypto_real_sell_pct_at_tp1", None)
+            pct = 100.0 if pct is None else float(pct)
+            if 0.0 < pct < 100.0:
+                partial_qty = self._round_down_to_step(qty * pct / 100.0, step)
+                remainder_qty = qty - partial_qty
+                if (
+                    partial_qty > 0
+                    and remainder_qty > 0
+                    and (partial_qty * price) >= min_notional
+                    and (remainder_qty * price) >= min_notional
+                ):
+                    partial_sell = True
+                    qty_sell = partial_qty
+                else:
+                    logger.info(
+                        f"⚖️ {pos.symbol}: partial TP1 not feasible "
+                        f"(partial={partial_qty * price:.2f}, remainder={remainder_qty * price:.2f}, "
+                        f"min_notional={min_notional}) — legacy full close at TP1"
+                    )
 
         # If the notional (qty * price) is below the exchange minimum, round UP
         # to the next step — the extra fraction of a coin is worth staying under
@@ -512,6 +556,20 @@ class RealTrader:
         account.total_trades += 1
         if pnl > 0:
             account.winning_trades += 1
+
+        if partial_sell:
+            # Shrink the position, mark TP1 done, keep it OPEN so the leftover
+            # can ride to TP2 or be stopped by the trailing stop.
+            pos.quantity = round(max(qty - qty_sell, 0.0), 12)
+            pos.invested = max(0.0, (pos.invested or 0.0) - cost_basis)
+            pos.tp1_partial_done = True
+            logger.info(
+                f"⚖️ REAL partial TP1 {pos.display or pos.symbol}: sold {qty_sell:.8f} "
+                f"@ {exit_price} pnl={pnl:+.6f} {pos.quote}; {pos.quantity:.8f} left riding to TP2"
+            )
+            if settings.crypto_real_notify:
+                await self._notify_partial_tp1(pos, exit_price, pnl, qty_sell)
+            return "partial"
 
         pos.status = STATUS_CLOSED
         pos.exit_price = exit_price
@@ -938,6 +996,21 @@ class RealTrader:
             f"💹 PnL: **{pnl_str} {pos.quote}** ({pnl_pct:+.2f}%)\n"
         )
         text += "🎉 *UNTUNG!*\n" if pnl >= 0 else "⚠️ *RUGI.*\n"
+        text += await self._portfolio_summary(pos.quote)
+        text += "\n_Order eksekusi real. Bukan saran investasi._"
+        await self._send_telegram(text)
+
+    async def _notify_partial_tp1(self, pos, exit_price: float, pnl: float, qty_sold: float) -> None:
+        pnl_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price else 0
+        pnl_str = f"{pnl:+.4f}" if abs(pnl) < 1 else f"{pnl:+.2f}"
+        text = (
+            f"⚖️ *REAL PARTIAL TP1* (uang sungguhan)\n\n"
+            f"🔹 {pos.display or pos.symbol}\n"
+            f"💵 Entry: {_fmt_price(pos.entry_price)} {pos.quote}\n"
+            f"🏁 Jual {qty_sold:.8f} @ {_fmt_price(exit_price)} {pos.quote}\n"
+            f"💹 PnL: **{pnl_str} {pos.quote}** ({pnl_pct:+.2f}%)\n"
+            f"📦 Sisa {pos.quantity:.8f} lanjut ke TP2/trailing.\n"
+        )
         text += await self._portfolio_summary(pos.quote)
         text += "\n_Order eksekusi real. Bukan saran investasi._"
         await self._send_telegram(text)

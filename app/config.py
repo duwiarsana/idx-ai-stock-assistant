@@ -182,7 +182,11 @@ class Settings(BaseSettings):
     crypto_real_max_drawdown: float = 50.0
     # Notify Telegram on every real fill.
     crypto_real_notify: bool = True
-    
+    # % of the position sold when TP1 is reached (the rest keeps riding the
+    # trailing stop toward TP2). Mirror of crypto_paper_sell_pct_at_tp1. 100 =
+    # legacy behaviour (full position closes at TP1).
+    crypto_real_sell_pct_at_tp1: float = 50.0
+
     # Real trading entry gate (stricter than paper)
     crypto_real_entry_require_uptrend: bool = True
     crypto_real_entry_require_breakout: bool = False

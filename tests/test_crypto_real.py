@@ -360,8 +360,163 @@ async def test_open_position_grows_size_when_allocation_below_min(monkeypatch, m
 
 
 @pytest.mark.asyncio
+async def test_close_position_partial_tp1_keeps_position_open(monkeypatch, make_candidate):
+    """TP1 (first fill) sells 50% via limit order and leaves the position OPEN
+    so the remaining half can ride to TP2 / the trailing stop."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    monkeypatch.setattr(get_settings(), "crypto_real_sell_pct_at_tp1", 50.0)
+    from app.services.crypto_real import RealTrader, STATUS_OPEN
+    t = RealTrader()
+
+    sold = {}
+
+    class FakeClient:
+        async def get_balance(self, asset):
+            return 0.1  # wallet holds the full position (no fee shortfall)
+
+        async def get_symbol_rules(self, symbol):
+            return {"step_size": 0.001, "min_qty": 0.001, "min_notional": 5.0}
+
+        async def market_sell(self, symbol, quantity):
+            raise AssertionError("TP1 partial must use a LIMIT sell")
+
+        async def limit_sell(self, symbol, quantity, price):
+            # TP exits place a LIMIT sell (slippage protection) — emulate a fill.
+            sold["symbol"] = symbol
+            sold["quantity"] = quantity
+            sold["limit_price"] = price
+            return {"code": 0, "data": {"orderId": 88, "executedQty": str(quantity),
+                                        "executedPrice": str(price), "executedQuoteQty": str(quantity * price),
+                                        "symbol": symbol}}
+
+    t.client = FakeClient()
+
+    class P:
+        id = "pos-real-1"
+        symbol = "SOL_USDT"
+        base = "SOL"
+        quote = "USDT"
+        display = "SOL/USDT"
+        status = STATUS_OPEN
+        mode = "REAL"
+        entry_price = 180.0
+        quantity = 0.1
+        invested = 18.0
+        take_profit_1 = 190.0
+        take_profit_2 = 200.0
+        stop_loss = 170.0
+        highest_price = 180.0
+        atr_value = 4.0
+        exit_price = None
+        exit_reason = None
+        realized_pnl = None
+        closed_at = None
+    pos = P()
+
+    class Account:
+        quote_asset = "USDT"
+        realized_pnl = 0.0
+        total_trades = 0
+        winning_trades = 0
+    account = Account()
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+        def add(self, obj): self.added.append(obj)
+    session = FakeSession()
+
+    ok = await t._close_position(session, pos, account, "TP1", 190.0)
+    assert ok == "partial"
+    assert sold["symbol"] == "SOL_USDT"
+    assert sold["quantity"] == 0.05        # 50% partial
+    assert pos.status == STATUS_OPEN       # still open — rider continues
+    assert pos.tp1_partial_done is True
+    assert pos.quantity == pytest.approx(0.05)
+    assert pos.realized_pnl is None        # not fully closed yet
+    # pnl on the partial slice: 0.05 * 190 − (0.05/0.1)*18 = 9.5 − 9.0
+    assert account.realized_pnl == pytest.approx(0.5, abs=0.01)
+    assert account.total_trades == 1
+
+    # Once TP1 is partially booked, a later TP1 touch must NOT sell again.
+    assert t._decide_exit(pos, 190.0) is None
+
+
+@pytest.mark.asyncio
+async def test_close_position_full_at_tp1_when_partial_not_feasible(monkeypatch, make_candidate):
+    """A small position whose 50% slice would fall under the exchange NOTIONAL
+    minimum falls back to the legacy full close at TP1."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    monkeypatch.setattr(get_settings(), "crypto_real_sell_pct_at_tp1", 50.0)
+    from app.services.crypto_real import RealTrader, STATUS_OPEN
+    t = RealTrader()
+
+    sold = {}
+
+    class FakeClient:
+        async def get_balance(self, asset):
+            return 0.05  # 9 USDT position (just above min 5)
+
+        async def get_symbol_rules(self, symbol):
+            return {"step_size": 0.001, "min_qty": 0.001, "min_notional": 5.0}
+
+        async def limit_sell(self, symbol, quantity, price):
+            # TP exits place a LIMIT sell (slippage protection) — emulate a fill.
+            sold["symbol"] = symbol
+            sold["quantity"] = quantity
+            sold["limit_price"] = price
+            return {"code": 0, "data": {"orderId": 88, "executedQty": str(quantity),
+                                        "executedPrice": str(price), "executedQuoteQty": str(quantity * price),
+                                        "symbol": symbol}}
+
+    t.client = FakeClient()
+
+    class P:
+        id = "pos-real-small"
+        symbol = "OP_USDT"
+        base = "OP"
+        quote = "USDT"
+        display = "OP/USDT"
+        status = STATUS_OPEN
+        mode = "REAL"
+        entry_price = 180.0
+        quantity = 0.05
+        invested = 9.0
+        take_profit_1 = 190.0
+        take_profit_2 = 200.0
+        stop_loss = 170.0
+        exit_price = None
+        exit_reason = None
+        realized_pnl = None
+        closed_at = None
+    pos = P()
+
+    class Account:
+        quote_asset = "USDT"
+        realized_pnl = 0.0
+        total_trades = 0
+        winning_trades = 0
+    account = Account()
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+        def add(self, obj): self.added.append(obj)
+    session = FakeSession()
+
+    ok = await t._close_position(session, pos, account, "TP1", 190.0)
+    assert ok is True                     # legacy full close
+    assert sold["quantity"] == 0.05       # full position sold
+    assert pos.status == "CLOSED"
+    assert pos.exit_reason == "TP1"
+    assert pos.realized_pnl == pytest.approx(0.5, abs=0.01)  # 0.05*190 − 9
+
+
+@pytest.mark.asyncio
 async def test_close_position_places_market_sell(monkeypatch, make_candidate):
-    """Closing a REAL position sells the full quantity at market."""
+    """Closing a REAL position with SL sells the full quantity at market."""
     from app.config import get_settings
     monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
     from app.services.crypto_real import RealTrader, STATUS_OPEN
@@ -380,7 +535,7 @@ async def test_close_position_places_market_sell(monkeypatch, make_candidate):
             sold["symbol"] = symbol
             sold["quantity"] = quantity
             return {"code": 0, "data": {"orderId": 88, "executedQty": str(quantity),
-                                        "executedPrice": "190", "executedQuoteQty": str(quantity * 190),
+                                        "executedPrice": "170", "executedQuoteQty": str(quantity * 170),
                                         "symbol": symbol}}
 
         async def limit_sell(self, symbol, quantity, price):
@@ -427,13 +582,13 @@ async def test_close_position_places_market_sell(monkeypatch, make_candidate):
         def add(self, obj): self.added.append(obj)
     session = FakeSession()
 
-    ok = await t._close_position(session, pos, account, "TP1", 190.0)
+    ok = await t._close_position(session, pos, account, "SL", 170.0)
     assert ok is True
     assert sold["symbol"] == "SOL_USDT"
     assert sold["quantity"] == 0.1
     assert pos.status == "CLOSED"
-    assert pos.realized_pnl == pytest.approx(1.0, abs=0.01)
-    assert pos.exit_reason == "TP1"
+    assert pos.realized_pnl == pytest.approx(-1.0, abs=0.01)
+    assert pos.exit_reason == "SL"
 
 
 @pytest.mark.asyncio
