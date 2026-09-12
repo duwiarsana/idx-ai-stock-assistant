@@ -21,7 +21,11 @@ logger = logging.getLogger(__name__)
 # TP1 at 3×ATR ensures profit covers trading fees (~0.2%) with room to breathe.
 TP1_ATR_MULT = 3.0  # was 2.5 → TP1 further from entry = fewer premature trail cuts
 TP2_ATR_MULT = 5.0  # was 4.0 → consistent spacing above TP1
-SL_ATR_MULT = 2.0  # was 1.5 → wider SL = fewer premature stops = higher win rate
+# SL 3×ATR is wider than the 2×ATR used before. 60-day backtest over 15 liquid
+# symbols with entry_score 85: WR 51.5%→55.7%, expectancy +0.95%→+1.04%/trade,
+# PF 4.30→4.33, drawdown flat (~2.35%) — fewer premature stop-outs beat the
+# slightly bigger loss per stop.
+SL_ATR_MULT = 3.0  # was 2.0 → wider SL = fewer premature stops = higher win rate
 
 
 @dataclass
