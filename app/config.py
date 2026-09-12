@@ -135,7 +135,11 @@ class Settings(BaseSettings):
     # Max % above EMA20 for a "pullback entry" (buy the dip, not the top).
     crypto_paper_entry_pullback_max_pct: float = 8.0  # was 5.0 → wider to catch more valid setups
     # % of the position sold when TP1 is reached (rest at TP2).
-    crypto_paper_sell_pct_at_tp1: float = 50.0
+    # Backtest (60d × 12 liquid symbols) showed ANY partial sell at TP1 (25/50/75%)
+    # CUTS expectancy (+0.59% → +0.47%/trade) vs a full close at TP1: riders that
+    # miss TP2 drift back into the SL and turnover drops. So the default is a full
+    # close (100). Set <100 to re-enable the partial-TP1 ride.
+    crypto_paper_sell_pct_at_tp1: float = 100.0
     # Move stop-loss to breakeven after TP1 is filled.
     crypto_paper_move_sl_to_breakeven: bool = True
     # Send Telegram notifications for paper open/close.
@@ -183,9 +187,10 @@ class Settings(BaseSettings):
     # Notify Telegram on every real fill.
     crypto_real_notify: bool = True
     # % of the position sold when TP1 is reached (the rest keeps riding the
-    # trailing stop toward TP2). Mirror of crypto_paper_sell_pct_at_tp1. 100 =
-    # legacy behaviour (full position closes at TP1).
-    crypto_real_sell_pct_at_tp1: float = 50.0
+    # trailing stop toward TP2). Mirror of crypto_paper_sell_pct_at_tp1. Backtest
+    # showed partial TP1 cuts expectancy, so default 100 = full close at TP1.
+    # Set <100 to re-enable the partial-TP1 ride.
+    crypto_real_sell_pct_at_tp1: float = 100.0
 
     # Real trading entry gate (stricter than paper)
     crypto_real_entry_require_uptrend: bool = True
