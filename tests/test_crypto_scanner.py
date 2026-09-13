@@ -171,3 +171,76 @@ async def test_kline_timeframes_requested(scanner):
         per_symbol.setdefault(sym, []).append(interval)
     for sym in ("BTC_USDT", "SUI_USDT", "TKO_IDR"):
         assert sorted(per_symbol[sym]) == ["15m", "1h", "5m"]
+
+
+@pytest.mark.asyncio
+async def test_spread_filter_skips_wide_spread_pair(monkeypatch):
+    """An illiquid pair with a wide bid/ask spread is dropped before klines."""
+    from app.config import get_settings
+    s = CryptoScanner(client=MockTokocryptoClient())
+    settings = get_settings()
+    monkeypatch.setattr(settings, "crypto_min_score_alert", 30)
+    monkeypatch.setattr(settings, "crypto_min_quote_volume", "1000000")
+    monkeypatch.setattr(settings, "crypto_spread_filter_enabled", True)
+    monkeypatch.setattr(settings, "crypto_spread_max_pct", 0.5)
+    async def noop(*a, **k): pass
+    s._persist_scan = noop
+    s.persist_alert = noop
+    async def fake_send(candidate, verdict, dry_run=None):
+        return {"sent": True, "dry_run": True, "reason": "test"}
+    monkeypatch.setattr("app.services.crypto_scanner.send_crypto_alert", fake_send)
+    async def fake_should(candidate, cooldown_minutes=None):
+        return True, "test"
+    monkeypatch.setattr("app.services.crypto_scanner.should_alert", fake_should)
+    from app.services.crypto_ai import deterministic_fallback
+    async def fake_analyze(candidates):
+        return {c["symbol"]: deterministic_fallback(c) for c in candidates}
+    monkeypatch.setattr("app.services.crypto_scanner.analyze_candidates", fake_analyze)
+
+    # Give every pair a sane bid/ask, then widen SUI's spread beyond 0.5%.
+    tickers = s.client.tickers
+    for k, t in list(tickers.items()):
+        lp = t.get("lastPrice") or 1.0
+        tickers[k] = {**t, "bidPrice": lp * 0.999, "askPrice": lp * 1.0005}
+    tickers["SUIUSDT"] = {**tickers["SUIUSDT"],
+                          "bidPrice": 1.0, "askPrice": 1.02}  # spread 2%
+
+    summary = await s.run_scan()
+    assert summary["status"] == "ok"
+    assert summary["pairs_skipped_spread"] == 1
+    assert summary["pairs_liquid"] == 2
+    symbols = {r["symbol"] for r in summary["results"]}
+    assert "SUI_USDT" not in symbols
+    assert "BTC_USDT" in symbols
+
+
+@pytest.mark.asyncio
+async def test_volume_consistency_filter_skips_spike_pairs(monkeypatch):
+    """Tight enough volume thresholds make the synthetic spiky pairs skip."""
+    from app.config import get_settings
+    s = CryptoScanner(client=MockTokocryptoClient())
+    settings = get_settings()
+    monkeypatch.setattr(settings, "crypto_min_score_alert", 30)
+    monkeypatch.setattr(settings, "crypto_min_quote_volume", "1000000")
+    monkeypatch.setattr(settings, "crypto_volume_consistency_enabled", True)
+    # Fixture volumes cycle 1800..1840 → max/median ≈ 1.011, peak share ≈ 4%.
+    monkeypatch.setattr(settings, "crypto_volume_consistency_max_spike_ratio", 1.005)
+    monkeypatch.setattr(settings, "crypto_volume_consistency_max_single_share", 0.01)
+    async def noop(*a, **k): pass
+    s._persist_scan = noop
+    s.persist_alert = noop
+    async def fake_send(candidate, verdict, dry_run=None):
+        return {"sent": True, "dry_run": True, "reason": "test"}
+    monkeypatch.setattr("app.services.crypto_scanner.send_crypto_alert", fake_send)
+    async def fake_should(candidate, cooldown_minutes=None):
+        return True, "test"
+    monkeypatch.setattr("app.services.crypto_scanner.should_alert", fake_should)
+    from app.services.crypto_ai import deterministic_fallback
+    async def fake_analyze(candidates):
+        return {c["symbol"]: deterministic_fallback(c) for c in candidates}
+    monkeypatch.setattr("app.services.crypto_scanner.analyze_candidates", fake_analyze)
+
+    summary = await s.run_scan()
+    # All three liquid pairs look "spiky" under these thresholds → zero survive.
+    assert summary["pairs_skipped_volume"] == 3
+    assert summary["candidates"] == 0

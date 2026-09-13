@@ -244,6 +244,12 @@ class TokocryptoClient:
             "count": row.get("count") or row.get("tradeCount"),
             "openPrice": num("openPrice"),
             "prevClosePrice": num("prevClosePrice"),
+            # Best bid/ask from the 24h ticker snapshot (used by the scanner's
+            # spread filter to reject slip-happy illiquid pairs).
+            "bidPrice": num("bidPrice"),
+            "bidQty": num("bidQty"),
+            "askPrice": num("askPrice"),
+            "askQty": num("askQty"),
         }
         return out
 

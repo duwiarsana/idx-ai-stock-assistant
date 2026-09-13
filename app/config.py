@@ -107,6 +107,27 @@ class Settings(BaseSettings):
     crypto_min_volume_pairs: int = 200
     crypto_max_candles: int = 300
 
+    # ── Freqtrade-style liquidity filters (scanner) ──────────────────
+    # Spread filter: skip pairs whose best-bid/best-ask spread exceeds the
+    # tolerance (%). A wide spread means a market order pays heavy slippage —
+    # exactly what momentum entries on low-liquidity pairs suffer from.
+    # The 24h ticker already carries bidPrice/askPrice (no extra API call).
+    crypto_spread_filter_enabled: bool = True
+    crypto_spread_max_pct: float = 0.5
+
+    # Volume consistency filter: reject pairs whose recent volume is dominated
+    # by a single candle spike (pump & dump) instead of being spread evenly
+    # across the window. Checked on the last N hours of 1h candles AND the
+    # equivalent 15m window. A candle fails if BOTH conditions hold in the same
+    # window: spike_ratio (max/median volume) above the max AND the single
+    # candle's share of the total window volume above the max share.
+    crypto_volume_consistency_enabled: bool = True
+    crypto_volume_consistency_window_hours: int = 24
+    crypto_volume_consistency_max_spike_ratio: float = 3.0
+    crypto_volume_consistency_max_single_share: float = 0.35
+    # Ignore windows with fewer bars than this (too little history to judge).
+    crypto_volume_consistency_min_bars: int = 12
+
     # HTTP / network
     crypto_api_timeout: int = 30
     crypto_max_concurrency: int = 5

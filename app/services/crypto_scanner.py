@@ -30,6 +30,7 @@ from app.services.crypto_indicators import (
 from app.services.crypto_scoring import compute_momentum_score
 from app.services.crypto_ai import analyze_candidates
 from app.services.crypto_alert import send_crypto_alert, should_alert
+from app.services.crypto_filters import check_spread, check_volume_consistency
 from app.services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,8 @@ class CryptoScanner:
             "pairs_found": 0,
             "pairs_analysed": 0,
         }
+        # Pairs skipped by the liquidity filters each cycle (reset per scan).
+        self.filter_skips = {"spread": 0, "volume": 0, "volume_reasons": []}
 
     async def run_scan(self, dry_run: Optional[bool] = None) -> dict:
         """Execute one full scan cycle. Safe against overlapping runs."""
@@ -85,6 +88,8 @@ class CryptoScanner:
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "pairs_found": 0,
                 "pairs_liquid": 0,
+                "pairs_skipped_spread": 0,
+                "pairs_skipped_volume": 0,
                 "candidates": 0,
                 "ai_analysed": 0,
                 "alerts_sent": 0,
@@ -104,6 +109,9 @@ class CryptoScanner:
                 summary["last_error"] = str(e)
                 self.state["last_error"] = str(e)
                 logger.exception(f"Crypto scan failed: {e}")
+
+            summary["pairs_skipped_spread"] = self.filter_skips["spread"]
+            summary["pairs_skipped_volume"] = self.filter_skips["volume"]
 
             summary["duration_ms"] = int((time.monotonic() - started) * 1000)
             summary["ended_at"] = datetime.now(timezone.utc).isoformat()
@@ -151,6 +159,7 @@ class CryptoScanner:
             return {"status": "error", "errors": 1, "last_error": f"tickers: {e}", "pairs_found": pairs_found}
 
         min_quote_volume = self._min_quote_volume()
+        self.filter_skips = {"spread": 0, "volume": 0, "volume_reasons": []}
         liquid: list[tuple] = []  # (symbol, ticker)
         for sym in filtered:
             ticker = tickers.get(sym.normalized_symbol)
@@ -159,9 +168,22 @@ class CryptoScanner:
             quote_volume = ticker.get("quoteVolume")
             if quote_volume is None or quote_volume < min_quote_volume:
                 continue
+            # Spread filter (Freqtrade-style): reject slip-happy pairs whose
+            # best bid/ask spread exceeds the tolerance. No extra API call —
+            # the 24h ticker already carries bidPrice/askPrice.
+            spread_res = check_spread(ticker)
+            if not spread_res.ok:
+                self.filter_skips["spread"] += 1
+                logger.debug(
+                    f"⛔ {sym.normalized_symbol}: skipped by spread filter "
+                    f"({spread_res.reason})"
+                )
+                continue
             liquid.append((sym, ticker))
         pairs_liquid = len(liquid)
-        logger.info(f"Pairs passing liquidity filter (≥{min_quote_volume:,.0f} quote vol): {pairs_liquid}")
+        logger.info(f"Pairs passing liquidity filter (≥{min_quote_volume:,.0f} "
+                    f"quote vol, spread ≤ {settings.crypto_spread_max_pct}%): "
+                    f"{pairs_liquid} (spread-skipped {self.filter_skips['spread']})")
 
         # Cap the number of pairs we actually analyse per cycle to respect
         # rate limits; sort by quote volume descending so the most liquid are
@@ -180,6 +202,19 @@ class CryptoScanner:
                 async with sem:
                     tf_klines = await self._fetch_tf_klines(sym)
                 if not tf_klines.get("1h"):
+                    return
+                # Volume consistency filter (Freqtrade-style): reject pairs whose
+                # recent volume is one-candle spike-dominated (pump & dump).
+                volume_res = check_volume_consistency(tf_klines)
+                if not volume_res.ok:
+                    self.filter_skips["volume"] += 1
+                    self.filter_skips["volume_reasons"].append(
+                        f"{sym.raw_symbol}: {volume_res.reason}"
+                    )
+                    logger.debug(
+                        f"⛔ {sym.raw_symbol}: skipped by volume consistency "
+                        f"({volume_res.reason})"
+                    )
                     return
                 candidate = self._score_pair(sym, ticker, tf_klines)
                 if candidate is None:
@@ -270,6 +305,8 @@ class CryptoScanner:
             "status": "ok",
             "pairs_found": pairs_found,
             "pairs_liquid": pairs_liquid,
+            "pairs_skipped_spread": self.filter_skips["spread"],
+            "pairs_skipped_volume": self.filter_skips["volume"],
             "pairs_analysed": len(scored),
             "candidates": len(candidates),
             "ai_analysed": ai_llm_count,
@@ -413,11 +450,14 @@ class CryptoScanner:
 
     def _log_summary(self, summary: dict) -> None:
         logger.info(
-            "📊 Crypto scan done: status=%s pairs=%s liquid=%s analysed=%s "
+            "📊 Crypto scan done: status=%s pairs=%s liquid=%s "
+            "spread-skip=%s vol-skip=%s analysed=%s "
             "candidates=%s ai=%s alerts=%s paper=%s/%s errors=%s top=%s duration=%sms",
             summary["status"],
             summary.get("pairs_found"),
             summary.get("pairs_liquid"),
+            summary.get("pairs_skipped_spread"),
+            summary.get("pairs_skipped_volume"),
             summary.get("pairs_analysed"),
             summary.get("candidates"),
             summary.get("ai_analysed"),
