@@ -48,6 +48,11 @@ class BacktestParams:
     sl_mult: float = SL_ATR_MULT
     cooldown_bars: int = 2  # 2 x 1h bars ~= the 120-min live cooldown
     partial_tp1_pct: float = 50.0  # % sold at TP1; remainder rides to TP2/trailing stop
+    # Trailing-stop behaviour (Hyperopt-friendly):
+    #   None → legacy settings-based ATR trailing (as run live),
+    #    0   → static SL only (trailing disabled),
+    #   >0   → Freqtrade-style trailing distance = peak * pct/100, floored by SL.
+    trailing_stop_pct: Optional[float] = None
 
 
 @dataclass
@@ -299,9 +304,16 @@ class CryptoBacktester:
                     if bar["high"] > highest_price:
                         highest_price = bar["high"]
 
-                    # Trailing stop below highest (mirrors live engine).
-                    trailing_stop = highest_price - max(atr * trailing_mult,
-                                                       entry_price * trailing_min_pct / 100.0)
+                    # Trailing stop below highest (mirrors live engine). When
+                    # trailing_stop_pct is set, it overrides the ATR trailing
+                    # (0 → static SL only, >0 → Freqtrade-style % of peak).
+                    if p.trailing_stop_pct is not None and p.trailing_stop_pct > 0:
+                        trailing_stop = highest_price - highest_price * p.trailing_stop_pct / 100.0
+                    elif p.trailing_stop_pct == 0:
+                        trailing_stop = 0.0
+                    else:
+                        trailing_stop = highest_price - max(atr * trailing_mult,
+                                                           entry_price * trailing_min_pct / 100.0)
                     effective_sl = max(sl, trailing_stop)
 
                     # Check exits: SL first (with slippage), then TP2, then TP1 —

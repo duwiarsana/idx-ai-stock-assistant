@@ -212,3 +212,34 @@ def test_partial_tp1_then_rider_stopped_out_reason_tp1_sl():
     m = res.metrics()
     assert m["tp1"] == 1
     assert m["sl"] == 1
+
+
+def test_trailing_stop_pct_zero_is_static_sl_only():
+    """trailing_stop_pct=0 disables trailing: a dip below the ATR trail but
+    above the static SL no longer stops the rider out."""
+    from app.services.crypto_backtester import BacktestParams
+    params = BacktestParams(partial_tp1_pct=100.0, trailing_stop_pct=0)
+    # Highest 102 → ATR trail would sit at 99.6; the 97.5 dip would trip it.
+    klines, i = _forced_candidate_klines([100.0, 102.0, 97.5, 104.0])
+    params._entry_idx = i
+    bt = _forced_bt(params)
+    res = bt.run_symbol(klines, "SYNTH")
+    assert len(res.trades) == 1
+    assert res.trades[0].exit_reason == "TP1"
+    assert res.trades[0].exit_price == pytest.approx(103.0)
+    assert res.trades[0].pnl_pct == pytest.approx(3.0)
+
+
+def test_trailing_stop_pct_peak_percentage_trips():
+    """trailing_stop_pct=2.0 → stop trails 2% below the peak (102 − 2.04);
+    the 97.5 dip crosses it and stops the trade out."""
+    from app.services.crypto_backtester import BacktestParams
+    params = BacktestParams(partial_tp1_pct=100.0, trailing_stop_pct=2.0)
+    klines, i = _forced_candidate_klines([100.0, 102.0, 97.5, 104.0])
+    params._entry_idx = i
+    bt = _forced_bt(params)
+    res = bt.run_symbol(klines, "SYNTH")
+    assert len(res.trades) == 1
+    assert res.trades[0].exit_reason == "SL"
+    assert res.trades[0].exit_price == pytest.approx(97.5)
+    assert res.trades[0].pnl_pct == pytest.approx(-2.5)
