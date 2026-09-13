@@ -62,10 +62,13 @@ class Settings(BaseSettings):
     qwen_base_url: str = "http://localhost:8000/v1"  # Opencode MCP or local
     qwen_model: str = "qwen3.5-397b"
     
-    # Groq (Secondary - Fast, Free)
+    # Groq (Secondary - Fast, Free). Model must exist on the account; as of
+    # 2026-09 the llama-3.3-70b-versatile model no longer exists → switched to
+    # gpt-oss-120b (best reasoning; ~$0.36/M input + $1.0/M output tokens).
+    # Cheaper alt: qwen/qwen3.8-27b.
     groq_api_key: str = ""
     groq_base_url: str = "https://api.groq.com/openai/v1"
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
     
     # Gemini (Tertiary - Backup)
     gemini_api_key: str = ""
@@ -153,6 +156,12 @@ class Settings(BaseSettings):
     # (AI down / not analysed) the candidate is NOT rejected — the AI is never
     # a single point of failure.
     crypto_paper_ai_filter_enabled: bool = True
+
+    # ── Crypto AI analysis depth ───────────────────────
+    # Number of most recent closes per timeframe to include in the LLM prompt.
+    # Higher = richer context (trend structure, swing levels) but more input
+    # tokens per scan. 0 = compact summary only (cheapest, original behaviour).
+    crypto_ai_candle_lookback: int = 200
 
     # ── Crypto Real Trading (REAL MONEY — be careful) ─────────
     # When enabled, the scanner opens REAL orders instead of paper positions.

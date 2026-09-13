@@ -8,10 +8,13 @@ from app.services.crypto_ai import (
     parse_verdict,
     deterministic_fallback,
     _parse_batch,
+    _trim_payloads,
 )
 
 
 def sample_candidate(score=85.0):
+    closes_1h = [round(1.0 + i * 0.01, 6) for i in range(200)]
+    closes_15m = [round(1.2 + i * 0.003, 6) for i in range(96)]
     return {
         "symbol": "SUI_USDT",
         "score": score,
@@ -28,6 +31,14 @@ def sample_candidate(score=85.0):
                 "price": 1.234,
                 "atr_pct": 2.1,
             },
+        },
+        "score_breakdown": {"trend": 100.0, "momentum": 70.0, "volume": 80.0,
+                            "breakout": 90.0, "risk_penalty": -10.0},
+        "ticker": {"quoteVolume": 1_500_000.0},
+        "series": {"1h": closes_1h, "15m": closes_15m},
+        "price_levels": {
+            "entry": 1.20, "take_profit_1": 1.33, "take_profit_2": 1.45,
+            "stop_loss": 1.10, "risk_reward": 2.0,
         },
     }
 
@@ -103,6 +114,47 @@ def test_build_candidate_payload_no_crash():
     assert d["score"] == 85.0
     assert d["breakout"] is True
     assert d["volatility"] == "medium"  # atr_pct 2.1 → medium
+
+
+def test_build_candidate_payload_carries_candle_series():
+    d = build_candidate_payload(sample_candidate()).to_dict()
+    assert len(d["candles_1h"]) == 200
+    assert len(d["candles_15m"]) == 96
+    # newest close last (canary on ordering upstream)
+    assert d["candles_1h"][-1] > d["candles_1h"][0]
+    # all closes are plain floats
+    assert all(isinstance(x, float) and x == round(x, 6) for x in d["candles_1h"])
+
+
+def test_build_candidate_payload_backcompat_without_series():
+    c = sample_candidate()
+    c.pop("series")
+    d = build_candidate_payload(c).to_dict()
+    assert d["candles_1h"] == []
+    assert d["candles_15m"] == []
+    assert d["scoreBreakdown"]["trend"] == 100.0
+    assert d["volume24h"] == 1_500_000.0
+    assert d["entry"] == 1.20
+
+
+def test_trim_payloads_under_budget_unchanged():
+    d = build_candidate_payload(sample_candidate()).to_dict()
+    payloads = [d.copy()]
+    out = _trim_payloads(payloads)
+    assert len(out[0]["candles_1h"]) == 200
+    assert len(out[0]["candles_15m"]) == 96
+
+
+def test_trim_payloads_shrinks_when_over_budget(monkeypatch):
+    monkeypatch.setattr("app.services.crypto_ai._MAX_BATCH_CHARS", 500)
+    d = build_candidate_payload(sample_candidate()).to_dict()
+    payloads = [d.copy() for _ in range(3)]
+    out = _trim_payloads(payloads)
+    # over budget → 15m dropped first
+    assert "candles_15m" not in out[0]
+    # still over budget → 1h trimmed to last 100
+    assert len(out[0]["candles_1h"]) == 100
+    assert out[0]["scoreBreakdown"]["trend"] == 100.0  # indicators never dropped
 
 
 def test_ai_verdict_never_raises_on_weird_types():

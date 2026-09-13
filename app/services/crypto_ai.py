@@ -1,8 +1,9 @@
 """AI analysis layer for the crypto scanner.
 
-The deterministic scanner selects candidates first; this module only adds an
-AI interpretation layer on top. The AI must NOT compute indicators from raw
-candles — it only receives a compact summary and produces a structured verdict.
+The deterministic scanner selects candidates first; this module adds an
+AI interpretation layer on top. The AI does NOT compute indicators from raw
+candles — it receives a rich, sanitised summary (real recent closes + every
+computed indicator/level) and produces a structured verdict.
 
 AI is never a single point of failure: if the LLM fails, the caller falls back
 to a deterministic verdict derived from the momentum score.
@@ -23,12 +24,27 @@ settings = get_settings()
 ALLOWED_VERDICTS = ("STRONG_WATCH", "WATCH", "NEUTRAL", "AVOID")
 
 _SYSTEM_PROMPT = """You are a cryptocurrency momentum scanner. You receive a compact
-summary of technical data for a candidate coin. Your job:
+summary of technical data for a candidate coin, INCLUDING hundreds of recent
+closing prices and every indicator/parameter the deterministic engine computed.
+Your job:
 - Interpret the data.
 - Judge setup QUALITY, not price direction certainty.
 - Flag possible false breakouts / pumps.
 - Classify risk.
 - Give a short human-readable reason.
+
+How to use the data:
+- Use the full candle series (candles_1h, candles_15m: most recent LAST) to
+  verify trend structure, swing highs/lows, support/resistance, how extended
+  price is, and whether an entry near the current price offers good risk/reward.
+- Check where entry / takeProfit1 / takeProfit2 / stopLoss sit relative to the
+  recent swing levels from the series.
+- Cross-check the score components (trend/momentum/volume/breakout/risk_penalty)
+  and the per-timeframe indicators (RSI, EMA trend, MACD, ATR%, relative volume).
+- A genuine setup: trend up on 1H, price pulling back near support, RSI not
+  overbought on the entry timeframe, volume confirming, risk/reward favourable.
+- Flag counter-evidence: overbought RSI, price extended far above the 1H EMA,
+  no true swing support below, falling volume, warning signs of a pump.
 
 Rules:
 - ONLY use the data provided. NEVER invent numbers.
@@ -37,12 +53,13 @@ Rules:
 - Do NOT use BUY/SELL verdicts.
 
 Allowed verdicts:
-- STRONG_WATCH (excellent momentum setup)
+- STRONG_WATCH (excellent momentum setup, low counter-evidence)
 - WATCH (decent setup worth watching)
 - NEUTRAL (mixed signals)
 - AVOID (poor / risky setup)
 
-Respond with a SINGLE JSON object (no markdown fences) with EXACTLY this schema:
+Respond with a SINGLE JSON array (no markdown fences) — one object per symbol.
+Each object has EXACTLY this schema:
 {
   "symbol": "XXX_USDT",
   "verdict": "WATCH",
@@ -51,12 +68,17 @@ Respond with a SINGLE JSON object (no markdown fences) with EXACTLY this schema:
   "reason": ["bullet point 1", "bullet point 2"],
   "warning": "short warning or empty string"
 }
-risk is one of: LOW, MEDIUM, HIGH."""
+responses.
+- reason: 1–3 short bullet points, each ≤15 words, no fluff.
+- risk is one of: LOW, MEDIUM, HIGH."""
 
 
 @dataclass
 class CandidatPayload:
-    """Compact candidate summary sent to the AI."""
+    """Rich candidate summary sent to the AI. Includes the full score
+    breakdown, per-timeframe indicators, entry/TP/SL levels and (when available)
+    a compact series of recent closes per timeframe so the LLM can verify trend
+    structure. Never carries raw OHLCV of every timeframe — closes only."""
     symbol: str
     score: float
     price: Optional[float]
@@ -75,6 +97,10 @@ class CandidatPayload:
     takeProfit1: Optional[float] = None
     takeProfit2: Optional[float] = None
     stopLoss: Optional[float] = None
+    scoreBreakdown: Optional[dict] = None
+    volume24h: Optional[float] = None
+    candles_1h: list[float] = field(default_factory=list)
+    candles_15m: list[float] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {k: (round(v, 2) if isinstance(v, float) else v) for k, v in asdict(self).items()}
@@ -130,6 +156,10 @@ def build_candidate_payload(candidate: dict) -> CandidatPayload:
         takeProfit1=levels.get("take_profit_1"),
         takeProfit2=levels.get("take_profit_2"),
         stopLoss=levels.get("stop_loss"),
+        scoreBreakdown=(candidate.get("score_breakdown") or None),
+        volume24h=((candidate.get("ticker") or {}).get("quoteVolume") or None),
+        candles_1h=list((candidate.get("series") or {}).get("1h") or []),
+        candles_15m=list((candidate.get("series") or {}).get("15m") or []),
     )
 
 
@@ -224,6 +254,30 @@ def deterministic_fallback(candidate: dict) -> AIVerdict:
     )
 
 
+# Safety cap for the AI batch prompt — bound token cost even if lookback or
+# candidate count grows. We trim candle detail, never indicator fields.
+_MAX_BATCH_CHARS = 120_000
+
+
+def _trim_payloads(payloads: list[dict]) -> list[dict]:
+    """Shrink candle series of a big batch so the LLM prompt stays in budget."""
+    total = sum(len(json.dumps(p)) for p in payloads)
+    if total <= _MAX_BATCH_CHARS:
+        return payloads
+    # First cut: drop 15m series.
+    for p in payloads:
+        if isinstance(p, dict):
+            p.pop("candles_15m", None)
+    total = sum(len(json.dumps(p)) for p in payloads)
+    if total <= _MAX_BATCH_CHARS:
+        return payloads
+    # Second cut: keep only the last 100 1h closes per symbol.
+    for p in payloads:
+        if isinstance(p, dict) and isinstance(p.get("candles_1h"), list):
+            p["candles_1h"] = p["candles_1h"][-100:]
+    return payloads
+
+
 async def analyze_candidates(candidates: list[dict]) -> dict[str, AIVerdict]:
     """Analyse a batch of candidate summaries with the AI.
 
@@ -233,9 +287,12 @@ async def analyze_candidates(candidates: list[dict]) -> dict[str, AIVerdict]:
     if not candidates:
         return {}
 
-    payloads = [build_candidate_payload(c).to_dict() for c in candidates]
+    payloads = _trim_payloads([build_candidate_payload(c).to_dict() for c in candidates])
     user_prompt = (
-        "Here are the top candidate coins from the deterministic scanner:\n"
+        "Here are the top candidate coins from the deterministic scanner. Each "
+        "object contains the full score breakdown, per-timeframe indicators, "
+        "entry/TP/SL levels and the most recent closing prices (candles_1h and "
+        "candles_15m, oldest FIRST, latest LAST):\n"
         f"{json.dumps(payloads, indent=2, default=str)}\n\n"
         "Analyse each and return a JSON array of objects with the schema described in the "
         "system prompt (one object per symbol)."
@@ -247,7 +304,11 @@ async def analyze_candidates(candidates: list[dict]) -> dict[str, AIVerdict]:
             system_prompt=_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=2000,
+            # N verdicts × (bullets + warning): 2000 trims the JSON array, 4000
+            # trims it again with rich 200-candle context (long reasons) →
+            # truncated JSON → silent fallback. 16000 gives the model comfortable
+            # headroom for 10 symbols; cheap because output is the small part.
+            max_tokens=16000,
         )
         verdicts = _parse_batch(raw, candidates)
         if verdicts:

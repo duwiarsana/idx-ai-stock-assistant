@@ -311,6 +311,18 @@ class CryptoScanner:
 
         score, breakdown = compute_momentum_score(tf_summaries, price_change)
 
+        # Thank/fill AI analysis depth: attach compact close series so the LLM
+        # can judge trend structure / swing levels from real prices, not just
+        # the pre-computed summary. Token-cheap (rounded floats, oldest→newest).
+        lookback = getattr(settings, "crypto_ai_candle_lookback", 200) or 0
+        series: dict[str, list[float]] = {}
+        if lookback > 0:
+            series = {
+                tf: [round(c, 6) for c in candles_to_closes(tf_klines[tf])[-lookback:]]
+                for tf in ("1h", "15m")
+                if tf_klines.get(tf)
+            }
+
         # Deterministic entry / TP / SL reference levels.
         from app.services.crypto_levels import compute_price_levels
         price_levels = compute_price_levels(tf_summaries, tf_klines["1h"], ticker=ticker)
@@ -326,6 +338,7 @@ class CryptoScanner:
             "price_change": price_change,
             "tf_summaries": tf_summaries,
             "price_levels": price_levels.to_dict(),
+            "series": series,
             "ticker": ticker,
         }
 
