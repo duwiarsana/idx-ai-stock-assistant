@@ -25,6 +25,7 @@ from typing import Optional
 
 from app.config import get_settings
 from app.services.crypto_alert import _fmt_price
+from app.services.crypto_exits import dynamic_roi_exit, trailing_stop_effective
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -35,11 +36,13 @@ STATUS_CLOSED = "CLOSED"
 EXIT_TP1 = "TP1"
 EXIT_TP2 = "TP2"
 EXIT_SL = "SL"
+EXIT_ROI = "ROI"
 
 SIDE_BUY = "BUY"
 SIDE_SELL_TP1 = "SELL_TP1"
 SIDE_SELL_TP2 = "SELL_TP2"
 SIDE_SELL_SL = "SELL_SL"
+SIDE_SELL_ROI = "SELL_ROI"
 
 
 def _is_blacklisted_base(symbol: str) -> bool:
@@ -307,28 +310,15 @@ class RealTrader:
         tp1 = pos.take_profit_1
         tp2 = pos.take_profit_2
         entry_price = pos.entry_price or price
-        
-        # Calculate trailing stop: max of original SL or a percentage below
-        # the highest price seen since entry (capped at breakeven initially).
-        highest_since_entry = pos.highest_price or entry_price
-        if price > highest_since_entry:
-            highest_since_entry = price
-            pos.highest_price = price
-        
-        # Trailing distance: configurable ×ATR (default loosened from the old
-        # hardcoded 1.2×ATR) or min % of entry, whichever is larger. A too-tight
-        # trailing stops out winners on the first pullback before they reach TP1.
-        atr = pos.atr_value or (entry_price * 0.02)  # fallback to 2%
-        trailing_distance = max(
-            atr * settings.crypto_real_trailing_mult,
-            entry_price * (settings.crypto_real_trailing_min_pct / 100.0),
-        )
-        
-        # Trailing stop price (never below original SL)
-        trailing_stop = highest_since_entry - trailing_distance
-        effective_sl = max(sl or trailing_stop, trailing_stop)
-        
-        # Exit checks in priority order: SL first (including trailing), then TP.
+
+        # Freqtrade-style trailing stop (shared pure function — see
+        # crypto_exits). Persist any new peak so the trail survives restarts.
+        effective_sl, highest_seen = trailing_stop_effective(pos, price)
+        if highest_seen > (pos.highest_price or entry_price):
+            pos.highest_price = highest_seen
+
+        # Exit checks in priority order: SL first (including trailing), TP2,
+        # TP1, then the time-based dynamic ROI release.
         # SL wick guard: tolerate a small overshoot past the stop on a single
         # ticker snapshot. A momentary wick below SL that recovers should not
         # force a market sell at the bottom — exit only when price is genuinely
@@ -365,6 +355,16 @@ class RealTrader:
                 )
                 return None
             return EXIT_TP1
+        # Dynamic ROI: free capital from old, thin-profit positions instead of
+        # waiting for a full TP (only fires in the profit band BELOW TP levels,
+        # because TP checks above already returned).
+        roi = dynamic_roi_exit(pos, price)
+        if roi:
+            logger.info(
+                f"⏱️ {pos.symbol}: dynamic ROI exit — price={price:.6f} "
+                f"profit={(price - entry_price) / entry_price * 100:.2f}%"
+            )
+            return roi
         return None
 
     async def _close_position(self, session, pos, account, action: str, price: float) -> bool:
@@ -545,7 +545,8 @@ class RealTrader:
         session.add(CryptoPaperTrade(
             position_id=pos.id,
             symbol=pos.symbol,
-            side={EXIT_TP1: SIDE_SELL_TP1, EXIT_TP2: SIDE_SELL_TP2, EXIT_SL: SIDE_SELL_SL}[action],
+            side={EXIT_TP1: SIDE_SELL_TP1, EXIT_TP2: SIDE_SELL_TP2,
+                  EXIT_SL: SIDE_SELL_SL, EXIT_ROI: SIDE_SELL_ROI}[action],
             price=exit_price,
             quantity=qty_sell,
             quote_amount=proceeds,

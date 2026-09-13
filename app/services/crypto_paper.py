@@ -19,6 +19,7 @@ from typing import Optional
 
 from app.config import get_settings
 from app.services.crypto_alert import _fmt_price
+from app.services.crypto_exits import dynamic_roi_exit, trailing_stop_effective
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -31,12 +32,14 @@ STATUS_CLOSED = "CLOSED"
 EXIT_TP1 = "TP1"
 EXIT_TP2 = "TP2"
 EXIT_SL = "SL"
+EXIT_ROI = "ROI"
 
 # Trade sides
 SIDE_BUY = "BUY"
 SIDE_SELL_TP1 = "SELL_TP1"
 SIDE_SELL_TP2 = "SELL_TP2"
 SIDE_SELL_SL = "SELL_SL"
+SIDE_SELL_ROI = "SELL_ROI"
 
 
 class PaperTrader:
@@ -146,39 +149,24 @@ class PaperTrader:
         return closed
 
     def _decide_exit(self, pos, price: float) -> Optional[str]:
-        """Return EXIT_TP1 / EXIT_TP2 / EXIT_SL, or None if no exit.
-        
-        Uses a trailing stop mechanism to avoid premature exits from noise.
-        The stop loss is dynamic: it trails up as price increases but never
-        moves down (protects profits while avoiding false stop-outs).
+        """Return EXIT_TP1 / EXIT_TP2 / EXIT_SL / EXIT_ROI, or None if no exit.
+
+        Uses a Freqtrade-style trailing stop + time-based dynamic ROI (shared
+        pure functions in crypto_exits), so paper mirrors the real engine's
+        exit rules exactly.
         """
         sl = pos.stop_loss
         tp1 = pos.take_profit_1
         tp2 = pos.take_profit_2
         entry_price = pos.entry_price or price
-        
-        # Calculate trailing stop: max of original SL or a percentage below
-        # the highest price seen since entry (capped at breakeven initially).
-        # This prevents exit during normal pullbacks but locks in profits.
-        highest_since_entry = pos.highest_price or entry_price
-        if price > highest_since_entry:
-            highest_since_entry = price
-            pos.highest_price = price
-        
-        # Trailing distance: configurable ×ATR (same as the real engine; the
-        # old hardcoded 1.2×ATR was validated too tight and cut winners before
-        # TP1 — see CRYPTO_REAL_TRAILING_MULT) or min % of entry, larger wins.
-        atr = pos.atr_value or (entry_price * 0.02)  # fallback to 2%
-        trailing_distance = max(
-            atr * settings.crypto_real_trailing_mult,
-            entry_price * (settings.crypto_real_trailing_min_pct / 100.0),
-        )
-        
-        # Trailing stop price (never below original SL)
-        trailing_stop = highest_since_entry - trailing_distance
-        effective_sl = max(sl or trailing_stop, trailing_stop)
-        
-        # Exit checks in priority order: SL first (including trailing), then TP.
+
+        # Freqtrade-style trailing stop — same logic as the real engine.
+        effective_sl, highest_seen = trailing_stop_effective(pos, price)
+        if highest_seen > (pos.highest_price or entry_price):
+            pos.highest_price = highest_seen
+
+        # Exit checks in priority order: SL first (including trailing), then TP2,
+        # TP1, then the time-based dynamic ROI release.
         # Wick guard mirrors the real engine: skip SL unless price is genuinely
         # beyond the stop (a momentary dip then recovery shouldn't lock a loss).
         if effective_sl and price <= effective_sl:
@@ -192,6 +180,15 @@ class PaperTrader:
         # hold it for TP2 / the trailing stop instead.
         if tp1 is not None and price >= tp1 and not getattr(pos, "tp1_partial_done", False):
             return EXIT_TP1
+        # Dynamic ROI: early exit for old, thin-profit positions (below the TP
+        # band, because the TP checks above already returned).
+        roi = dynamic_roi_exit(pos, price)
+        if roi:
+            logger.info(
+                f"⏱️ Paper {pos.symbol}: dynamic ROI exit — profit "
+                f"{(price - entry_price) / entry_price * 100:.2f}%"
+            )
+            return roi
         return None
 
     async def _close_position(self, session, pos, account, action: str, price: float):
@@ -242,7 +239,8 @@ class PaperTrader:
         session.add(CryptoPaperTrade(
             position_id=pos.id,
             symbol=pos.symbol,
-            side={EXIT_TP1: SIDE_SELL_TP1, EXIT_TP2: SIDE_SELL_TP2, EXIT_SL: SIDE_SELL_SL}[action],
+            side={EXIT_TP1: SIDE_SELL_TP1, EXIT_TP2: SIDE_SELL_TP2,
+                  EXIT_SL: SIDE_SELL_SL, EXIT_ROI: SIDE_SELL_ROI}[action],
             price=exit_price,
             quantity=sell_qty,
             quote_amount=proceeds,

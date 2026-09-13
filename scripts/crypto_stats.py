@@ -71,7 +71,7 @@ def _fmt(s: dict) -> str:
         f"n={s['trades']:3d} WR={s['win_rate']:5.1f}% avgW={s['avg_win']:+.3f} "
         f"avgL={s['avg_loss']:+.3f} exp={s['expectancy']:+.4f} pnl={s['total_pnl']:+.3f} "
         f"USDT  (TP1={r.get('TP1', 0)} TP2={r.get('TP2', 0)} SL={r.get('SL', 0)} "
-        f"END={r.get('END', 0)})"
+        f"ROI={r.get('ROI', 0)} END={r.get('END', 0)})"
     )
 
 

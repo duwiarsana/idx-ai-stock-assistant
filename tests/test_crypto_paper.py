@@ -208,8 +208,108 @@ class TestExitDecision:
         pos.take_profit_2 = 1.0
         assert trader._decide_exit(pos, 5.0) == EXIT_SL
 
+    def test_trailing_trigger_engine_arms_only_after_offset(self, trader, monkeypatch):
+        """Freqtrade-style: with trailing_only_after=2%, the SL stays static until
+        the PEAK hits +2%; once armed it trails and survives pullbacks."""
+        from datetime import timedelta, timezone, datetime
+        from app.config import get_settings
+
+        gs = get_settings()
+        monkeypatch.setattr(gs, "crypto_real_trailing_enabled", True)
+        monkeypatch.setattr(gs, "crypto_real_trailing_only_after_pct", 2.0)
+        monkeypatch.setattr(gs, "crypto_real_trailing_pct", 1.5)
+        monkeypatch.setattr(gs, "crypto_real_sl_exit_tolerance_pct", 0.0)
+        monkeypatch.setattr(gs, "crypto_real_dynamic_roi_enabled", False)
+
+        entry = 1.234
+        pos = make_position(price=entry)
+        pos.highest_price = entry
+        pos.created_at = datetime.now(timezone.utc)
+
+        # price +1% (below the +2% offset): static SL (0.97×entry) applies.
+        # A dip to 0.98×entry is above the static SL → hold (NOT trailed).
+        assert trader._decide_exit(pos, entry * 0.98) is None
+
+        # peak reaches +3% → trail arms and rides 1.5% under the peak.
+        assert trader._decide_exit(pos, entry * 1.03) is None
+        assert pos.highest_price == pytest.approx(entry * 1.03)
+
+        # pullback to ~entry: still above static SL but below the armed
+        # trailing stop (1.03×entry × 0.985) → SL exit now.
+        assert trader._decide_exit(pos, entry * 0.995) == EXIT_SL
+
+    def test_dynamic_roi_engine_release(self, trader, monkeypatch):
+        """Only fires for old positions at thin profit — TP still wins first,
+        and young/thin positions are left alone."""
+        from datetime import timedelta, timezone, datetime
+        from app.config import get_settings
+
+        gs = get_settings()
+        monkeypatch.setattr(gs, "crypto_real_dynamic_roi_enabled", True)
+        monkeypatch.setattr(gs, "crypto_real_dynamic_roi_tiers", "120:1.0,240:0.8")
+
+        now = datetime.now(timezone.utc)
+
+        # Old (5h) + ≥0.8% profit and below TP1 → ROI release.
+        old = make_position()
+        old.created_at = now - timedelta(hours=5)
+        assert trader._decide_exit(old, 1.234 * 1.01) == "ROI"
+
+        # Old but profit already at TP1 → TP1 wins (ROI must not preempt TP).
+        at_tp1 = make_position()
+        at_tp1.created_at = now - timedelta(hours=5)
+        assert trader._decide_exit(at_tp1, 1.234 * 1.05) == EXIT_TP1
+
+        # Young (30m) with thin profit → hold.
+        young = make_position()
+        young.created_at = now - timedelta(minutes=30)
+        assert trader._decide_exit(young, 1.234 * 1.01) is None
+
 
 class TestClosePosition:
+    @pytest.mark.asyncio
+    async def test_close_via_roi_no_keyerror(self, trader, monkeypatch):
+        """Closing via the dynamic-ROI action is a full market-style close."""
+        from app.services.crypto_paper import EXIT_ROI, SIDE_SELL_ROI
+        from app.models.crypto import CryptoPaperTrade
+
+        monkeypatch.setattr("app.services.crypto_paper.settings.crypto_paper_notify", False)
+
+        class Account:
+            quote_asset = "USDT"
+            cash_balance = 10000.0
+            realized_pnl = 0.0
+            total_trades = 0
+            winning_trades = 0
+
+        class FakeSession:
+            def __init__(self):
+                self.added = []
+            def add(self, obj):
+                self.added.append(obj)
+            async def flush(self):
+                pass
+
+        session = FakeSession()
+        pos = make_position(price=1.234)
+        pos.id = 1
+        session.add(pos)
+        await session.flush()
+
+        account = Account()
+        await trader._close_position(session, pos, account, EXIT_ROI, 1.20)
+
+        trade = next(
+            (o for o in session.added if isinstance(o, CryptoPaperTrade)),
+            None,
+        )
+        assert trade is not None
+        assert trade.side == SIDE_SELL_ROI
+        assert trade.price == 1.20          # market-style: trigger price booked
+        assert pos.status == "CLOSED"
+        assert pos.exit_reason == EXIT_ROI
+        assert pos.quantity == 10.0         # full close, never partial
+        assert account.total_trades == 1
     @pytest.mark.asyncio
     async def test_close_via_tp2_and_sl_no_keyerror(self, trader, monkeypatch):
         """Closing via TP2/SL records the side and marks the position CLOSED."""

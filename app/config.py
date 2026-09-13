@@ -224,6 +224,31 @@ class Settings(BaseSettings):
     # genuinely 0.5%+ UNDER the stop before we exit (real breakdowns still
     # caught on the next 30s quick-check). 0 = disable (exit instantly).
     crypto_real_sl_exit_tolerance_pct: float = 0.5
+    # ── Freqtrade-style exits: trailing stop + dynamic ROI ────────────
+    # Trailing master switch. True = legacy behaviour (trail from entry at the
+    # ATR/min% distance below the peak). False = trailing off entirely; exits
+    # purely on the static stop_loss.
+    crypto_real_trailing_enabled: bool = True
+    # Only start trailing once floating profit reaches this % (Freqtrade
+    # "trailing_only_offset_is_reached"). 0 = trail from entry (legacy).
+    # E.g. 2.0 → SL only starts moving after price is +2% above entry.
+    crypto_real_trailing_only_after_pct: float = 0.0
+    # Trailing distance as % of the highest price, used AFTER the trigger
+    # (Freqtrade "trailing_stop_positive"). 0 = keep the max(ATR×mult, entry×%)
+    # distance above. E.g. 1.5 → stop sits 1.5% below the peak.
+    crypto_real_trailing_pct: float = 0.0
+
+    # Dynamic ROI exit (Freqtrade "minimal_roi"): time-based early exit so stale
+    # thin-profit positions release capital instead of waiting for a full TP.
+    # Off by default → legacy behaviour.
+    crypto_real_dynamic_roi_enabled: bool = False
+    # Tiers as "open_minutes:min_profit_pct,..." e.g. "120:1.0,240:0.8". Exit
+    # when position age ≥ minutes AND floating profit ≥ percent (time-ANDed per
+    # tier; the first tier whose age is reached applies). Empty string → fall
+    # back to the single (min, percent) pair below.
+    crypto_real_dynamic_roi_tiers: str = ""
+    crypto_real_dynamic_roi_min: int = 240
+    crypto_real_dynamic_roi_percent: float = 0.8
     # Require a short-term (15m) recovery confirmation before entry: reject
     # candidates whose 15m is still bearish. This stops the engine from buying
     # a pullback that is still heading down (falling knife) — we only enter

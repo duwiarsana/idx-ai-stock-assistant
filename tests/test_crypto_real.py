@@ -592,6 +592,138 @@ async def test_close_position_places_market_sell(monkeypatch, make_candidate):
 
 
 @pytest.mark.asyncio
+async def test_close_position_via_roi_uses_market_sell(monkeypatch, make_candidate):
+    """Dynamic-ROI exit is a MARKET sell (like SL), full close, side SELL_ROI."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "crypto_real_notify", False)
+    from app.services.crypto_real import RealTrader, STATUS_OPEN, SIDE_SELL_ROI
+    t = RealTrader()
+
+    sold = {}
+
+    class FakeClient:
+        async def get_balance(self, asset):
+            return 0.1
+
+        async def get_symbol_rules(self, symbol):
+            return {"step_size": 0.001, "min_qty": 0.001, "min_notional": 5.0}
+
+        async def market_sell(self, symbol, quantity):
+            sold["symbol"] = symbol
+            sold["quantity"] = quantity
+            return {"code": 0, "data": {"orderId": 88, "executedQty": str(quantity),
+                                        "executedPrice": str(181.8), "executedQuoteQty": str(quantity * 181.8),
+                                        "symbol": symbol}}
+
+        async def limit_sell(self, symbol, quantity, price):
+            raise AssertionError("ROI exit must use a MARKET sell, not a LIMIT order")
+
+    t.client = FakeClient()
+
+    class P:
+        id = "pos-real-1"
+        symbol = "SOL_USDT"
+        base = "SOL"
+        quote = "USDT"
+        display = "SOL/USDT"
+        status = STATUS_OPEN
+        mode = "REAL"
+        entry_price = 180.0
+        quantity = 0.1
+        invested = 18.0
+        take_profit_1 = 190.0
+        take_profit_2 = 200.0
+        stop_loss = 170.0
+        highest_price = 182.0
+        atr_value = 4.0
+        exit_price = None
+        exit_reason = None
+        realized_pnl = None
+        closed_at = None
+    pos = P()
+
+    class Account:
+        quote_asset = "USDT"
+        realized_pnl = 0.0
+        total_trades = 0
+        winning_trades = 0
+    account = Account()
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+        def add(self, obj): self.added.append(obj)
+    session = FakeSession()
+
+    ok = await t._close_position(session, pos, account, "ROI", 181.8)
+    assert ok is True
+    assert sold["symbol"] == "SOL_USDT"
+    from app.models.crypto import CryptoPaperTrade
+    trade = next((o for o in session.added if isinstance(o, CryptoPaperTrade)), None)
+    assert trade is not None and trade.side == SIDE_SELL_ROI
+    assert pos.status == "CLOSED"
+    assert pos.exit_reason == "ROI"
+
+
+def test_trailing_trigger_and_roi_exit_decision(monkeypatch, make_candidate):
+    """Engine integrates the Freqtrade-style trigger+trail and dynamic ROI."""
+    from datetime import timedelta, timezone, datetime
+    from app.config import get_settings
+    from app.services.crypto_real import RealTrader, STATUS_OPEN
+
+    gs = get_settings()
+    monkeypatch.setattr(gs, "crypto_real_notify", False)
+    monkeypatch.setattr(gs, "crypto_real_trailing_enabled", True)
+    monkeypatch.setattr(gs, "crypto_real_trailing_only_after_pct", 2.0)
+    monkeypatch.setattr(gs, "crypto_real_trailing_pct", 1.5)
+    monkeypatch.setattr(gs, "crypto_real_sl_exit_tolerance_pct", 0.0)
+    monkeypatch.setattr(gs, "crypto_real_dynamic_roi_enabled", True)
+    monkeypatch.setattr(gs, "crypto_real_dynamic_roi_tiers", "240:0.8")
+
+    t = RealTrader()
+
+    def make_pos(price, created=None):
+        class P:
+            id = "p"
+            symbol = "SOL_USDT"
+            display = "SOL/USDT"
+            status = STATUS_OPEN
+            mode = "REAL"
+            entry_price = price
+            quantity = 0.1
+            invested = 18.0
+            take_profit_1 = price * 1.05
+            take_profit_2 = price * 1.10
+            stop_loss = price * 0.97
+            highest_price = price
+            atr_value = price * 0.02
+            created_at = created
+        return P()
+
+    entry = 180.0
+    now = datetime.now(timezone.utc)
+
+    # 1) Static SL until the PEAK hits +2% (below offset → dip to 0.98 holds).
+    pos = make_pos(entry)
+    assert t._decide_exit(pos, entry * 0.98) is None
+    # 2) Peak +3% arms the trail; a pullback to ~entry now trips the trail.
+    assert t._decide_exit(pos, entry * 1.03) is None
+    assert t._decide_exit(pos, entry * 0.995) == "SL"
+
+    # 3) Dynamic ROI: old + thin profit → ROI release.
+    old = make_pos(entry, created=now - timedelta(hours=5))
+    assert t._decide_exit(old, entry * 1.01) == "ROI"
+
+    # 4) Same age but price at TP1 → TP wins over ROI.
+    at_tp1 = make_pos(entry, created=now - timedelta(hours=5))
+    assert t._decide_exit(at_tp1, entry * 1.05) == "TP1"
+
+    # 5) Young position at thin profit → hold.
+    young = make_pos(entry, created=now - timedelta(minutes=30))
+    assert t._decide_exit(young, entry * 1.01) is None
+
+
+@pytest.mark.asyncio
 async def test_close_position_keeps_open_on_sell_failure(monkeypatch, make_candidate):
     """A failed SELL must NOT mark the position closed (retry next cycle)."""
     from app.config import get_settings
