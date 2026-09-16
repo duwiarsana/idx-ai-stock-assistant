@@ -99,11 +99,12 @@ def compute_price_levels(
         tp2_price = price + tp2_mult * atr
         sl_price = price - sl_mult * atr
         
-        # Ensure TP1 is at least 2% above entry to cover trading fees (~0.2%)
-        min_tp1 = price * 1.02
+        # Ensure TP1 floor is at least 3.5% above entry so trades can ride trends
+        # while Auto BEP (+1.5%) protects capital and trailing stop locks profit.
+        min_tp1 = price * 1.035
         if tp1_price < min_tp1:
             tp1_price = min_tp1
-            levels.tp1_note = f"TP1 = min(2%, {tp1_mult}×ATR) untuk cover fee"
+            levels.tp1_note = f"TP1 = min(3.5%, {tp1_mult}×ATR)"
         
         levels.take_profit_1 = tp1_price
         levels.take_profit_2 = tp2_price
@@ -115,19 +116,19 @@ def compute_price_levels(
         # Range — buy near support / EMA pullback, target the resistance high.
         if high is not None:
             tp1_price = high
-            # Ensure TP1 is at least 2% above entry to cover trading fees
-            min_tp1 = price * 1.02
+            # Ensure TP1 floor is at least 3.5% above entry
+            min_tp1 = price * 1.035
             if tp1_price < min_tp1:
                 tp1_price = min_tp1
-                levels.tp1_note = f"TP1 = max(resistance, 2%) untuk cover fee"
+                levels.tp1_note = f"TP1 = max(resistance, 3.5%)"
             levels.take_profit_1 = tp1_price
-            levels.tp1_note = levels.tp1_note if hasattr(levels, 'tp1_note') else "TP1 = resistance terdekat (min 2%)"
+            levels.tp1_note = levels.tp1_note if hasattr(levels, 'tp1_note') else "TP1 = resistance terdekat (min 3.5%)"
         else:
             tp1_price = price + tp1_mult * atr
-            min_tp1 = price * 1.02
+            min_tp1 = price * 1.035
             if tp1_price < min_tp1:
                 tp1_price = min_tp1
-                levels.tp1_note = f"TP1 = min(2%, {tp1_mult}×ATR) untuk cover fee"
+                levels.tp1_note = f"TP1 = min(3.5%, {tp1_mult}×ATR)"
             levels.take_profit_1 = tp1_price
             levels.tp1_note = levels.tp1_note if hasattr(levels, 'tp1_note') else f"TP1 = harga + {tp1_mult}×ATR"
 

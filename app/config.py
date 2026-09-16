@@ -263,11 +263,11 @@ class Settings(BaseSettings):
     # Only start trailing once floating profit reaches this % (Freqtrade
     # "trailing_only_offset_is_reached"). 0 = trail from entry (legacy).
     # E.g. 2.0 → SL only starts moving after price is +2% above entry.
-    crypto_real_trailing_only_after_pct: float = 0.0
+    crypto_real_trailing_only_after_pct: float = 2.0
     # Trailing distance as % of the highest price, used AFTER the trigger
     # (Freqtrade "trailing_stop_positive"). 0 = keep the max(ATR×mult, entry×%)
     # distance above. E.g. 1.5 → stop sits 1.5% below the peak.
-    crypto_real_trailing_pct: float = 0.0
+    crypto_real_trailing_pct: float = 1.5
 
     # Dynamic ROI exit (Freqtrade "minimal_roi"): time-based early exit so stale
     # thin-profit positions release capital instead of waiting for a full TP.
