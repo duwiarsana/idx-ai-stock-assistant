@@ -145,9 +145,7 @@ class TestEntryGate:
         monkeypatch.setattr(get_settings(), "crypto_real_entry_score", 80)
         monkeypatch.setattr(get_settings(), "crypto_real_entry_pullback_max_pct", 3.0)
         monkeypatch.setattr(get_settings(), "crypto_paper_ai_filter_enabled", True)
-        # The shared REAL entry gate only accepts STRONG_WATCH (see comment at
-        # the test below) — WATCH is rejected by passes_entry_gate itself.
-        for verdict in ("STRONG_WATCH",):
+        for verdict in ("STRONG_WATCH", "WATCH"):
             cand = make_candidate(score=90, at_high=False)
             cand["ai_verdict"] = {"verdict": verdict}
             assert trader._passes_entry_gate(cand), f"should accept {verdict}"

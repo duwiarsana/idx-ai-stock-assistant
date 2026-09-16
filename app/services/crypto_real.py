@@ -165,9 +165,9 @@ def passes_entry_gate(c: dict, btc_bearish: bool = False) -> bool:
         if atr_pct > settings.crypto_real_entry_max_atr_pct:
             return False
 
-    # AI quality filter: ONLY accept STRONG_WATCH (stricter for higher win rate)
+    # AI quality filter: accept STRONG_WATCH or WATCH (consistent with paper & candidate loop)
     verdict = ((c.get("ai_verdict") or {}).get("verdict") or "").upper()
-    if verdict and verdict != "STRONG_WATCH":
+    if verdict and verdict not in ("STRONG_WATCH", "WATCH"):
         return False
 
     return True
