@@ -285,6 +285,9 @@ class Settings(BaseSettings):
     # a pullback that is still heading down (falling knife) — we only enter
     # once the 15m momentum has turned up/neutral. True default.
     crypto_real_entry_confirm_15m: bool = True
+    # BTC Market Trend Guard: reject altcoin entry if BTC 1h or 15m is strongly bearish.
+    # When BTC dumps, virtually all altcoins follow and hit SL. True default.
+    crypto_btc_filter_enabled: bool = True
     # Base symbols never traded by the real engine: stablecoins / pegged assets /
     # gold tokens / wrapped-staked assets. Their price is flat by design so TP/SL
     # levels are meaningless and taker fees guarantee a slow loss. Comma-separated

@@ -956,6 +956,47 @@ def test_entry_gate_blocks_pegged_assets(monkeypatch):
     assert t._passes_entry_gate(strong_candidate("SOL_USDT")) is True
 
 
+def test_btc_market_trend_filter(monkeypatch):
+    """When BTC trend is bearish, altcoin entries must be gated."""
+    from app.services.crypto_real import RealTrader, is_btc_market_bearish, passes_entry_gate
+
+    btc_dump = {
+        "symbol": "BTC_USDT",
+        "tf_summaries": {
+            "1h": {"trend": "bearish", "macd_state": "bearish"},
+            "15m": {"trend": "bearish", "macd_state": "bearish"},
+        },
+    }
+    btc_healthy = {
+        "symbol": "BTC_USDT",
+        "tf_summaries": {
+            "1h": {"trend": "bullish", "macd_state": "bullish"},
+            "15m": {"trend": "neutral", "macd_state": "neutral"},
+        },
+    }
+    sol_cand = {
+        "symbol": "SOL_USDT", "base": "SOL", "quote": "USDT",
+        "price": 100.0, "score": 90.0,
+        "tf_summaries": {
+            "1h": {"trend": "bullish", "macd_state": "bullish", "relative_volume": 2.0, "price": 100.0, "ema20": 98.0, "atr": 1.0},
+            "15m": {"trend": "bullish", "macd_state": "bullish"},
+        },
+        "ticker": {"quoteVolume": 1000000, "priceChangePercent": 2.0},
+        "price_levels": {"risk_reward": 2.0},
+        "ai_verdict": {"verdict": "STRONG_WATCH"},
+    }
+
+    # BTC is dumping -> bearish flag is True
+    assert is_btc_market_bearish([btc_dump]) is True
+    # BTC healthy -> bearish flag is False
+    assert is_btc_market_bearish([btc_healthy]) is False
+
+    # Altcoin entry blocked when BTC is bearish
+    assert passes_entry_gate(sol_cand, btc_bearish=True) is False
+    # Altcoin entry allowed when BTC is healthy
+    assert passes_entry_gate(sol_cand, btc_bearish=False) is True
+
+
 @pytest.mark.asyncio
 async def test_open_position_skips_when_balance_below_floor(monkeypatch, make_candidate):
     """When the balance can't support the position-size floor, skip the BUY."""

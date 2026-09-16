@@ -57,7 +57,27 @@ def _is_blacklisted_base(symbol: str) -> bool:
     return base in blacklist
 
 
-def passes_entry_gate(c: dict) -> bool:
+def is_btc_market_bearish(candidates: list[dict]) -> bool:
+    """Check if BTC is in a strong bearish breakdown.
+
+    Returns True if BTC is found and its 1h or 15m trend/momentum is bearish.
+    When BTC dumps, almost all altcoins get dragged down into stop-losses.
+    """
+    for c in candidates:
+        sym = (c.get("symbol") or "").upper()
+        if sym in ("BTC_USDT", "BTCUSDT", "BTC_IDR", "BTCIDR"):
+            s1h = (c.get("tf_summaries") or {}).get("1h") or {}
+            s15 = (c.get("tf_summaries") or {}).get("15m") or {}
+            # 1h strongly bearish (trend and macd)
+            if s1h.get("trend") == "bearish" and s1h.get("macd_state") == "bearish":
+                return True
+            # or 15m sudden breakdown
+            if s15.get("trend") == "bearish" and s15.get("macd_state") == "bearish":
+                return True
+    return False
+
+
+def passes_entry_gate(c: dict, btc_bearish: bool = False) -> bool:
     """Shared candidate gate used by BOTH the paper and real engines.
 
     Running them on identical signals is what makes the parallel paper-vs-real
@@ -70,6 +90,14 @@ def passes_entry_gate(c: dict) -> bool:
     if _is_blacklisted_base(symbol):
         logger.debug(f"🚫 {symbol}: pegged/blacklisted base asset — skipping")
         return False
+
+    # BTC Market Trend Guard: if BTC is dumping, reject non-BTC altcoin entries
+    if btc_bearish and getattr(settings, "crypto_btc_filter_enabled", True):
+        base = symbol.split("_")[0].upper()
+        if base != "BTC":
+            logger.info(f"🚫 {symbol}: BTC market trend is bearish — skipping entry to avoid SL")
+            return False
+
     score = c.get("score") or 0
     if score < settings.crypto_real_entry_score:
         return False
@@ -615,8 +643,12 @@ class RealTrader:
                 return 0
 
         shortlist = []
+        btc_bearish = is_btc_market_bearish(candidates)
+        if btc_bearish and getattr(settings, "crypto_btc_filter_enabled", True):
+            logger.info("⚠️ BTC trend is bearish — gating altcoin entries to prevent stop-outs")
+
         for c in sorted(candidates, key=lambda x: x.get("score", 0), reverse=True):
-            if not self._passes_entry_gate(c):
+            if not self._passes_entry_gate(c, btc_bearish=btc_bearish):
                 continue
             
             # Check SL cooldown
@@ -672,8 +704,8 @@ class RealTrader:
 
         return opened
 
-    def _passes_entry_gate(self, c: dict) -> bool:
-        return passes_entry_gate(c)
+    def _passes_entry_gate(self, c: dict, btc_bearish: bool = False) -> bool:
+        return passes_entry_gate(c, btc_bearish=btc_bearish)
 
     async def _drawdown_ok(self, session) -> bool:
         from sqlalchemy import select

@@ -338,10 +338,13 @@ class PaperTrader:
         # shortlist only — the scanner no longer burns LLM tokens on every
         # candidate when telegram alerts are off.
         shortlist = []
+        from app.services.crypto_real import is_btc_market_bearish
+        btc_bearish = is_btc_market_bearish(candidates)
+
         for c in sorted(candidates, key=lambda x: x.get("score", 0), reverse=True):
             symbol = c.get("symbol")
             score = c.get("score", 0)
-            passes_gate = self._passes_entry_gate(c)
+            passes_gate = self._passes_entry_gate(c, btc_bearish=btc_bearish)
             logger.info(f"Candidate {symbol} score={score} passes_gate={passes_gate}")
             if not passes_gate:
                 continue
@@ -401,12 +404,12 @@ class PaperTrader:
 
         return opened
 
-    def _passes_entry_gate(self, c: dict) -> bool:
+    def _passes_entry_gate(self, c: dict, btc_bearish: bool = False) -> bool:
         # SHARED gate with the real engine (crypto_real.passes_entry_gate).
         # Paper runs the exact same signal rules as REAL so the parallel
         # paper-vs-real comparison isolates execution quality only.
         from app.services.crypto_real import passes_entry_gate
-        return passes_entry_gate(c)
+        return passes_entry_gate(c, btc_bearish=btc_bearish)
 
     async def _open_position_count(self, session, quote: str) -> int:
         from sqlalchemy import select, func
