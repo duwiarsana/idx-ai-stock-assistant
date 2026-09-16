@@ -58,27 +58,54 @@ class TestTrailingStop:
     def test_auto_bep_triggered_when_peak_reaches_threshold(self, monkeypatch):
         gs = get_settings()
         monkeypatch.setattr(gs, "crypto_real_bep_enabled", True)
-        monkeypatch.setattr(gs, "crypto_real_bep_trigger_pct", 1.5)
-        monkeypatch.setattr(gs, "crypto_real_bep_buffer_pct", 0.25)
+        monkeypatch.setattr(gs, "crypto_real_bep_trigger_pct", 0.8)
+        monkeypatch.setattr(gs, "crypto_real_bep_buffer_pct", 0.15)
         monkeypatch.setattr(gs, "crypto_real_trailing_enabled", False)
-        # Entry 100, highest 101.6 (+1.6% >= 1.5%) -> SL raised to 100 * 1.0025 = 100.25
-        pos = make_pos(entry=100.0, sl=95.0, highest=101.6)
-        sl, _ = trailing_stop_effective(pos, 101.0)
-        assert sl == pytest.approx(100.25)
+        # Entry 100, highest 100.9 (+0.9% >= 0.8%) -> SL raised to 100 * (1 + 0.0015) = 100.15
+        pos = make_pos(entry=100.0, sl=95.0, highest=100.9)
+        sl, _ = trailing_stop_effective(pos, 100.5)
+        assert sl == pytest.approx(100.15)
+
+    def test_auto_bep_short_position(self, monkeypatch):
+        gs = get_settings()
+        monkeypatch.setattr(gs, "crypto_real_bep_enabled", True)
+        monkeypatch.setattr(gs, "crypto_real_bep_trigger_pct", 0.8)
+        monkeypatch.setattr(gs, "crypto_real_bep_buffer_pct", 0.15)
+        monkeypatch.setattr(gs, "crypto_real_trailing_enabled", False)
+        # Short: Entry 100, dropped to 99.1 (+0.9% profit >= 0.8%) -> SL lowered to 100 * (1 - 0.0015) = 99.85
+        pos = make_pos(entry=100.0, sl=105.0)
+        pos.side = "SHORT"
+        pos.lowest_price = 99.1
+        sl, _ = trailing_stop_effective(pos, 99.5)
+        assert sl == pytest.approx(99.85)
+
+    def test_auto_bep_half_tp1_trigger(self, monkeypatch):
+        gs = get_settings()
+        monkeypatch.setattr(gs, "crypto_real_bep_enabled", True)
+        monkeypatch.setattr(gs, "crypto_real_bep_trigger_pct", 2.0)  # High fallback trigger
+        monkeypatch.setattr(gs, "crypto_real_bep_buffer_pct", 0.15)
+        monkeypatch.setattr(gs, "crypto_real_trailing_enabled", False)
+        # TP1 is at 101.0 (+1.0%), so 50% to TP1 is +0.5%.
+        # Price reached 100.6 (+0.6% >= 0.5%) -> triggers BEP!
+        pos = make_pos(entry=100.0, sl=95.0, highest=100.6)
+        pos.take_profit_1 = 101.0
+        sl, _ = trailing_stop_effective(pos, 100.4)
+        assert sl == pytest.approx(100.15)
 
     def test_auto_bep_not_triggered_below_threshold(self, monkeypatch):
         gs = get_settings()
         monkeypatch.setattr(gs, "crypto_real_bep_enabled", True)
-        monkeypatch.setattr(gs, "crypto_real_bep_trigger_pct", 1.5)
-        monkeypatch.setattr(gs, "crypto_real_bep_buffer_pct", 0.25)
+        monkeypatch.setattr(gs, "crypto_real_bep_trigger_pct", 0.8)
+        monkeypatch.setattr(gs, "crypto_real_bep_buffer_pct", 0.15)
         monkeypatch.setattr(gs, "crypto_real_trailing_enabled", False)
-        # Entry 100, highest 101.2 (+1.2% < 1.5%) -> SL stays static 95.0
-        pos = make_pos(entry=100.0, sl=95.0, highest=101.2)
-        sl, _ = trailing_stop_effective(pos, 100.8)
+        # Entry 100, highest 100.5 (+0.5% < 0.8%, no TP1 set) -> SL stays static 95.0
+        pos = make_pos(entry=100.0, sl=95.0, highest=100.5)
+        sl, _ = trailing_stop_effective(pos, 100.2)
         assert sl == 95.0
 
     def test_trigger_not_reached_uses_static_sl(self, monkeypatch):
         gs = get_settings()
+        monkeypatch.setattr(gs, "crypto_real_bep_enabled", False)
         monkeypatch.setattr(gs, "crypto_real_trailing_enabled", True)
         monkeypatch.setattr(gs, "crypto_real_trailing_only_after_pct", 2.0)
         monkeypatch.setattr(gs, "crypto_real_trailing_pct", 1.5)

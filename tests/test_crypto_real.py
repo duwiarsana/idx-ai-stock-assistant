@@ -1180,3 +1180,60 @@ async def test_pegged_guard_covers_blacklist_without_rules(monkeypatch):
 
     # U is now in the static blacklist → refused even without rules
     assert await t._is_pegged("U_USDT") is True
+
+
+# ── Auto-BEP Notification & Deduplication ────────────────────────────
+
+@pytest.mark.asyncio
+async def test_bep_notification_triggered_once(monkeypatch):
+    """Auto-BEP must notify Telegram once when profit hits bep_trigger_pct, and not spam on subsequent ticks."""
+    from app.config import get_settings
+    from app.services.crypto_real import RealTrader
+    from types import SimpleNamespace
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "crypto_real_bep_enabled", True)
+    monkeypatch.setattr(settings, "crypto_real_bep_trigger_pct", 0.8)
+    monkeypatch.setattr(settings, "crypto_real_bep_buffer_pct", 0.15)
+    monkeypatch.setattr(settings, "crypto_real_notify", True)
+
+    t = RealTrader()
+    notified_list = []
+
+    async def fake_notify_bep(pos, bep_price, current_price, side="LONG"):
+        notified_list.append((pos.id, bep_price, current_price, side))
+
+    monkeypatch.setattr(t, "_notify_bep", fake_notify_bep)
+
+    pos = SimpleNamespace(
+        id=999,
+        symbol="SOL_USDT",
+        display="SOL/USDT",
+        entry_price=100.0,
+        highest_price=100.0,
+        quote="USDT",
+        take_profit_1=102.0,  # 50% to TP1 is +1.0%, so trigger_pct 0.8% takes precedence
+        stop_loss=95.0,
+    )
+
+    # 1. Price at +0.5% -> below trigger (0.8%), no notification
+    await t._check_bep_notification(pos, 100.5)
+    assert len(notified_list) == 0
+    assert "999" not in t._bep_notified_positions
+    assert pos.stop_loss == 95.0
+
+    # 2. Price at +0.9% -> hits trigger (0.8%), notifies once and updates pos.stop_loss
+    await t._check_bep_notification(pos, 100.9)
+    assert len(notified_list) == 1
+    pos_id, bep_price, cur_price, side = notified_list[0]
+    assert pos_id == 999
+    assert bep_price == pytest.approx(100.15)  # 100 * (1 + 0.15/100)
+    assert cur_price == 100.9
+    assert side == "LONG"
+    assert "999" in t._bep_notified_positions
+    assert pos.stop_loss == pytest.approx(100.15)
+
+    # 3. Subsequent cycle / higher price -> already notified, no duplicate
+    await t._check_bep_notification(pos, 101.5)
+    assert len(notified_list) == 1
+

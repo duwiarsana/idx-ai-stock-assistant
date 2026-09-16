@@ -246,14 +246,16 @@ class Settings(BaseSettings):
     # caught on the next 30s quick-check). 0 = disable (exit instantly).
     crypto_real_sl_exit_tolerance_pct: float = 0.5
     # ── Auto BEP (Break-Even Point) ──────────────────────────────────
-    # When enabled, once peak profit touches bep_trigger_pct, SL is automatically
-    # raised to at least entry * (1 + bep_buffer_pct/100).
-    # This prevents winning positions from ever turning into net-negative trades.
+    # When enabled, once peak profit touches bep_trigger_pct (or 50% towards TP1),
+    # SL is automatically raised to at least entry * (1 + bep_buffer_pct/100) for LONG
+    # or entry * (1 - bep_buffer_pct/100) for SHORT.
+    # Total BEP offset 0.15% covers exchange round-trip fees (0.05% open + 0.05% close)
+    # plus 0.05% slippage buffer.
     crypto_real_bep_enabled: bool = True
-    # Profit % above entry needed to trigger auto-BEP (e.g. 1.5%).
-    crypto_real_bep_trigger_pct: float = 1.5
-    # Buffer % above entry price to lock in BEP (e.g. 0.25% covers 0.2% taker fee).
-    crypto_real_bep_buffer_pct: float = 0.25
+    # Profit % above entry needed to trigger auto-BEP (default 0.8% or 50% to TP1).
+    crypto_real_bep_trigger_pct: float = 0.8
+    # Dynamic offset % to cover round-trip fee + slippage (0.15% = 0.0015).
+    crypto_real_bep_buffer_pct: float = 0.15
 
     # ── Freqtrade-style exits: trailing stop + dynamic ROI ────────────
     # Trailing master switch. True = legacy behaviour (trail from entry at the
@@ -271,14 +273,14 @@ class Settings(BaseSettings):
 
     # Dynamic ROI exit (Freqtrade "minimal_roi"): time-based early exit so stale
     # thin-profit positions release capital instead of waiting for a full TP.
-    # Off by default → legacy behaviour.
-    crypto_real_dynamic_roi_enabled: bool = False
-    # Tiers as "open_minutes:min_profit_pct,..." e.g. "120:1.0,240:0.8". Exit
+    # Default ON to prevent positions from getting stuck indefinitely.
+    crypto_real_dynamic_roi_enabled: bool = True
+    # Tiers as "open_minutes:min_profit_pct,..." e.g. "60:1.2,120:0.8,240:0.5". Exit
     # when position age ≥ minutes AND floating profit ≥ percent (time-ANDed per
     # tier; the first tier whose age is reached applies). Empty string → fall
     # back to the single (min, percent) pair below.
-    crypto_real_dynamic_roi_tiers: str = ""
-    crypto_real_dynamic_roi_min: int = 240
+    crypto_real_dynamic_roi_tiers: str = "60:1.2,120:0.8,240:0.5"
+    crypto_real_dynamic_roi_min: int = 120
     crypto_real_dynamic_roi_percent: float = 0.8
     # Require a short-term (15m) recovery confirmation before entry: reject
     # candidates whose 15m is still bearish. This stops the engine from buying

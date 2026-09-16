@@ -182,6 +182,8 @@ class RealTrader:
         # Price cache to avoid rate limiting: {symbol: (price, timestamp)}
         self._price_cache: dict[str, tuple[float, float]] = {}
         self._cache_ttl = 15.0  # 15 seconds TTL
+        # Track positions that already triggered and notified BEP (to prevent spam)
+        self._bep_notified_positions: set[str] = set()
         self.state = {
             "enabled": settings.crypto_real_trading_enabled,
             "last_cycle_at": None,
@@ -251,6 +253,9 @@ class RealTrader:
                 if price > highest:
                     pos.highest_price = price
                 
+                # Check auto-BEP notification trigger
+                await self._check_bep_notification(pos, price)
+                
                 action = self._decide_exit(pos, price)
                 
                 if action is None:
@@ -306,6 +311,9 @@ class RealTrader:
                 highest = pos.highest_price or pos.entry_price
                 if price > highest:
                     pos.highest_price = price
+                
+                # Check auto-BEP notification trigger
+                await self._check_bep_notification(pos, price)
                 
                 action = self._decide_exit(pos, price)
                 
@@ -605,6 +613,9 @@ class RealTrader:
         pos.exit_reason = action
         pos.realized_pnl = pnl
         pos.closed_at = datetime.now(timezone.utc)
+
+        # Clean up BEP notification tracking
+        self._bep_notified_positions.discard(str(pos.id))
 
         logger.info(
             f"💰 REAL SELL {pos.display or pos.symbol} via {action}: "
@@ -1044,9 +1055,65 @@ class RealTrader:
             f"💹 PnL: **{pnl_str} {pos.quote}** ({pnl_pct:+.2f}%)\n"
             f"📦 Sisa {pos.quantity:.8f} lanjut ke TP2/trailing.\n"
         )
+        await self._send_telegram(text)
+
+    async def _notify_bep(self, pos, bep_price: float, current_price: float, side: str = "LONG") -> None:
+        profit_pct = (
+            ((current_price - pos.entry_price) / pos.entry_price * 100)
+            if side == "LONG"
+            else ((pos.entry_price - current_price) / pos.entry_price * 100)
+        ) if pos.entry_price else 0
+        text = (
+            "🛡️ *REAL AUTO-BEP ACTIVATED* (uang sungguhan)\n\n"
+            f"🔹 {pos.display or pos.symbol} ({side})\n"
+            f"💵 Entry: {_fmt_price(pos.entry_price)} {pos.quote}\n"
+            f"📈 Harga Saat Ini: {_fmt_price(current_price)} {pos.quote} ({profit_pct:+.2f}%)\n"
+            f"🔒 SL Baru (BEP Lock): {_fmt_price(bep_price)} {pos.quote}\n\n"
+            "✨ *Stop-Loss disesuaikan menutup round-trip fee (0.10%) + buffer slippage (0.05%).*\n"
+            "Posisi kini telah RISK-FREE!"
+        )
         text += await self._portfolio_summary(pos.quote)
         text += "\n_Order eksekusi real. Bukan saran investasi._"
         await self._send_telegram(text)
+
+    async def _check_bep_notification(self, pos, current_price: float) -> None:
+        """Check if position reached BEP threshold (or 50% to TP1) and send Telegram alert once."""
+        if not getattr(settings, "crypto_real_bep_enabled", False):
+            return
+        entry = pos.entry_price
+        if not entry or entry <= 0:
+            return
+
+        trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 0.8)
+        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.15)
+        side = (getattr(pos, "side", None) or getattr(pos, "direction", "LONG") or "LONG").upper()
+        tp1 = getattr(pos, "take_profit_1", None)
+
+        if side == "SHORT":
+            lowest = min(getattr(pos, "lowest_price", entry) or entry, current_price)
+            profit_pct = (entry - lowest) / entry * 100.0
+            half_tp1_pct = ((entry - tp1) / entry * 100.0 * 0.5) if (tp1 and tp1 < entry) else None
+            effective_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            bep_price = entry * (1.0 - buffer_pct / 100.0)
+        else:
+            highest = max(pos.highest_price or entry, current_price)
+            profit_pct = (highest - entry) / entry * 100.0
+            half_tp1_pct = ((tp1 - entry) / entry * 100.0 * 0.5) if (tp1 and tp1 > entry) else None
+            effective_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            bep_price = entry * (1.0 + buffer_pct / 100.0)
+
+        if profit_pct >= effective_trigger:
+            pos_key = str(pos.id)
+            if pos_key not in self._bep_notified_positions:
+                self._bep_notified_positions.add(pos_key)
+                # Persist BEP stop_loss to position record in DB
+                pos.stop_loss = bep_price
+                logger.info(
+                    f"🛡️ {pos.symbol} ({side}): Auto-BEP triggered (profit={profit_pct:+.2f}% >= {effective_trigger:.2f}%), "
+                    f"locking SL at {bep_price:.6f}"
+                )
+                if settings.crypto_real_notify:
+                    await self._notify_bep(pos, bep_price, current_price, side=side)
 
     async def _portfolio_summary(self, quote: str = "USDT") -> str:
         """Build portfolio summary: only show bot-traded positions (not full exchange balance)."""

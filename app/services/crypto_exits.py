@@ -75,25 +75,53 @@ def trailing_stop_effective(pos, price: float, settings=None) -> tuple[Optional[
     highest = max(pos.highest_price or entry, price)
 
     # ── Auto BEP (Break-Even Point) ──────────────────────────────────
-    # If auto-BEP is enabled and peak price has touched bep_trigger_pct above entry,
-    # establish a baseline stop-loss at least at entry * (1 + bep_buffer_pct/100).
-    # This guarantees that once in profit, the SL never drops below break-even + fees.
+    # If auto-BEP is enabled and peak profit touches bep_trigger_pct (or 50% to TP1),
+    # establish a baseline stop-loss at:
+    # - LONG : entry * (1 + bep_buffer_pct/100) (default +0.15% offset)
+    # - SHORT: entry * (1 - bep_buffer_pct/100) (default -0.15% offset)
+    # This guarantees that once in profit, the SL covers round-trip fees (0.05% open + 0.05% close)
+    # plus slippage (0.05%) for a true risk-free break-even.
     bep_floor: Optional[float] = None
     if getattr(settings, "crypto_real_bep_enabled", False) and entry:
-        trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 1.5)
-        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.25)
-        peak_profit_pct = (highest - entry) / entry * 100.0
-        if peak_profit_pct >= trigger_pct:
-            bep_floor = entry * (1.0 + buffer_pct / 100.0)
+        trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 0.8)
+        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.15)
+        side = (getattr(pos, "side", None) or getattr(pos, "direction", "LONG") or "LONG").upper()
+        tp1 = getattr(pos, "take_profit_1", None)
+
+        if side == "SHORT":
+            # For SHORT, profit is when price drops below entry
+            lowest = min(getattr(pos, "lowest_price", entry) or entry, price)
+            profit_pct = (entry - lowest) / entry * 100.0
+            # 50% distance towards TP1 trigger check
+            half_tp1_pct = ((entry - tp1) / entry * 100.0 * 0.5) if (tp1 and tp1 < entry) else None
+            effective_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            if profit_pct >= effective_trigger:
+                bep_floor = entry * (1.0 - buffer_pct / 100.0)
+        else:
+            # For LONG (spot default)
+            peak_profit_pct = (highest - entry) / entry * 100.0
+            # 50% distance towards TP1 trigger check
+            half_tp1_pct = ((tp1 - entry) / entry * 100.0 * 0.5) if (tp1 and tp1 > entry) else None
+            effective_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            if peak_profit_pct >= effective_trigger:
+                bep_floor = entry * (1.0 + buffer_pct / 100.0)
+
+    is_short = (getattr(pos, "side", None) or getattr(pos, "direction", "LONG") or "LONG").upper() == "SHORT"
 
     if not settings.crypto_real_trailing_enabled:
-        effective_sl = max(sl, bep_floor) if (sl and bep_floor) else (bep_floor or sl)
+        if is_short:
+            effective_sl = min(sl, bep_floor) if (sl and bep_floor) else (bep_floor or sl)
+        else:
+            effective_sl = max(sl, bep_floor) if (sl and bep_floor) else (bep_floor or sl)
         return effective_sl, highest
 
     if settings.crypto_real_trailing_only_after_pct > 0:
         peak_profit_pct = (highest - entry) / entry * 100.0 if entry else 0.0
         if peak_profit_pct < settings.crypto_real_trailing_only_after_pct:
-            effective_sl = max(sl, bep_floor) if (sl and bep_floor) else (bep_floor or sl)
+            if is_short:
+                effective_sl = min(sl, bep_floor) if (sl and bep_floor) else (bep_floor or sl)
+            else:
+                effective_sl = max(sl, bep_floor) if (sl and bep_floor) else (bep_floor or sl)
             return effective_sl, highest  # peak hasn't hit trailing offset yet
 
     # Distance below the peak:
@@ -112,8 +140,12 @@ def trailing_stop_effective(pos, price: float, settings=None) -> tuple[Optional[
         )
 
     trailing_stop = highest - distance
-    candidates = [val for val in (sl, bep_floor, trailing_stop) if val is not None]
-    return max(candidates) if candidates else None, highest
+    if is_short:
+        candidates = [val for val in (sl, bep_floor) if val is not None]
+        return min(candidates) if candidates else None, highest
+    else:
+        candidates = [val for val in (sl, bep_floor, trailing_stop) if val is not None]
+        return max(candidates) if candidates else None, highest
 
 
 def dynamic_roi_exit(pos, price: float, settings=None) -> Optional[str]:
