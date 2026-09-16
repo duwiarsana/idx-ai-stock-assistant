@@ -74,13 +74,27 @@ def trailing_stop_effective(pos, price: float, settings=None) -> tuple[Optional[
     sl = pos.stop_loss
     highest = max(pos.highest_price or entry, price)
 
+    # ── Auto BEP (Break-Even Point) ──────────────────────────────────
+    # If auto-BEP is enabled and peak price has touched bep_trigger_pct above entry,
+    # establish a baseline stop-loss at least at entry * (1 + bep_buffer_pct/100).
+    # This guarantees that once in profit, the SL never drops below break-even + fees.
+    bep_floor: Optional[float] = None
+    if getattr(settings, "crypto_real_bep_enabled", False) and entry:
+        trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 1.5)
+        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.25)
+        peak_profit_pct = (highest - entry) / entry * 100.0
+        if peak_profit_pct >= trigger_pct:
+            bep_floor = entry * (1.0 + buffer_pct / 100.0)
+
     if not settings.crypto_real_trailing_enabled:
-        return sl, highest
+        effective_sl = max(sl, bep_floor) if (sl and bep_floor) else (bep_floor or sl)
+        return effective_sl, highest
 
     if settings.crypto_real_trailing_only_after_pct > 0:
         peak_profit_pct = (highest - entry) / entry * 100.0 if entry else 0.0
         if peak_profit_pct < settings.crypto_real_trailing_only_after_pct:
-            return sl, highest  # peak hasn't hit the offset yet → trail unarmed
+            effective_sl = max(sl, bep_floor) if (sl and bep_floor) else (bep_floor or sl)
+            return effective_sl, highest  # peak hasn't hit trailing offset yet
 
     # Distance below the peak:
     #  * trailing_pct > 0 → Freqtrade "trailing_stop_positive": % of the peak
@@ -98,7 +112,8 @@ def trailing_stop_effective(pos, price: float, settings=None) -> tuple[Optional[
         )
 
     trailing_stop = highest - distance
-    return max(sl or trailing_stop, trailing_stop), highest
+    candidates = [val for val in (sl, bep_floor, trailing_stop) if val is not None]
+    return max(candidates) if candidates else None, highest
 
 
 def dynamic_roi_exit(pos, price: float, settings=None) -> Optional[str]:

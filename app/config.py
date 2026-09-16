@@ -245,6 +245,16 @@ class Settings(BaseSettings):
     # genuinely 0.5%+ UNDER the stop before we exit (real breakdowns still
     # caught on the next 30s quick-check). 0 = disable (exit instantly).
     crypto_real_sl_exit_tolerance_pct: float = 0.5
+    # ── Auto BEP (Break-Even Point) ──────────────────────────────────
+    # When enabled, once peak profit touches bep_trigger_pct, SL is automatically
+    # raised to at least entry * (1 + bep_buffer_pct/100).
+    # This prevents winning positions from ever turning into net-negative trades.
+    crypto_real_bep_enabled: bool = True
+    # Profit % above entry needed to trigger auto-BEP (e.g. 1.5%).
+    crypto_real_bep_trigger_pct: float = 1.5
+    # Buffer % above entry price to lock in BEP (e.g. 0.25% covers 0.2% taker fee).
+    crypto_real_bep_buffer_pct: float = 0.25
+
     # ── Freqtrade-style exits: trailing stop + dynamic ROI ────────────
     # Trailing master switch. True = legacy behaviour (trail from entry at the
     # ATR/min% distance below the peak). False = trailing off entirely; exits

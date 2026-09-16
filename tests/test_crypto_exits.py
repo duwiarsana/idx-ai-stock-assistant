@@ -49,10 +49,33 @@ class TestTrailingStop:
     def test_disabled_returns_static_sl(self, monkeypatch):
         monkeypatch.setattr(get_settings(), "crypto_real_trailing_enabled", False)
         monkeypatch.setattr(get_settings(), "crypto_real_trailing_only_after_pct", 0.0)
+        monkeypatch.setattr(get_settings(), "crypto_real_bep_enabled", False)
         pos = make_pos(entry=100.0, sl=95.0, atr=2.0, highest=105.0)
         sl, highest = trailing_stop_effective(pos, 104.0)
         assert sl == 95.0
         assert highest == 105.0
+
+    def test_auto_bep_triggered_when_peak_reaches_threshold(self, monkeypatch):
+        gs = get_settings()
+        monkeypatch.setattr(gs, "crypto_real_bep_enabled", True)
+        monkeypatch.setattr(gs, "crypto_real_bep_trigger_pct", 1.5)
+        monkeypatch.setattr(gs, "crypto_real_bep_buffer_pct", 0.25)
+        monkeypatch.setattr(gs, "crypto_real_trailing_enabled", False)
+        # Entry 100, highest 101.6 (+1.6% >= 1.5%) -> SL raised to 100 * 1.0025 = 100.25
+        pos = make_pos(entry=100.0, sl=95.0, highest=101.6)
+        sl, _ = trailing_stop_effective(pos, 101.0)
+        assert sl == pytest.approx(100.25)
+
+    def test_auto_bep_not_triggered_below_threshold(self, monkeypatch):
+        gs = get_settings()
+        monkeypatch.setattr(gs, "crypto_real_bep_enabled", True)
+        monkeypatch.setattr(gs, "crypto_real_bep_trigger_pct", 1.5)
+        monkeypatch.setattr(gs, "crypto_real_bep_buffer_pct", 0.25)
+        monkeypatch.setattr(gs, "crypto_real_trailing_enabled", False)
+        # Entry 100, highest 101.2 (+1.2% < 1.5%) -> SL stays static 95.0
+        pos = make_pos(entry=100.0, sl=95.0, highest=101.2)
+        sl, _ = trailing_stop_effective(pos, 100.8)
+        assert sl == 95.0
 
     def test_trigger_not_reached_uses_static_sl(self, monkeypatch):
         gs = get_settings()
