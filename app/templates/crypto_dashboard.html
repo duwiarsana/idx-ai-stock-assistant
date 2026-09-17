@@ -648,11 +648,96 @@
         </div>
     </div>
 
+    <!-- Chart Modal -->
+    <div id="chartModal" class="modal-overlay hidden" onclick="if(event.target===this)closeChartModal()">
+        <div class="chart-modal">
+            <div class="chart-modal-header">
+                <div style="display:flex;align-items:center;gap:10px">
+                    <div class="logo-mark" style="font-size:14px">📈</div>
+                    <div>
+                        <div id="chartSymbolLabel" style="font-size:15px;font-weight:800;color:#fff;font-family:'JetBrains Mono'">—</div>
+                        <div id="chartPriceLabel" style="font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono';margin-top:2px">Live Price</div>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                    <div class="interval-tabs" id="intervalTabs">
+                        <button class="itab" data-iv="1m" onclick="switchInterval('1m')">1m</button>
+                        <button class="itab" data-iv="5m" onclick="switchInterval('5m')">5m</button>
+                        <button class="itab itab-active" data-iv="15m" onclick="switchInterval('15m')">15m</button>
+                        <button class="itab" data-iv="1h" onclick="switchInterval('1h')">1h</button>
+                        <button class="itab" data-iv="4h" onclick="switchInterval('4h')">4h</button>
+                        <button class="itab" data-iv="1d" onclick="switchInterval('1d')">1D</button>
+                    </div>
+                    <button class="btn-cancel" style="padding:5px 14px;font-size:12px" onclick="closeChartModal()">✕ Tutup</button>
+                </div>
+            </div>
+            <div id="chartContainer" style="position:relative;width:100%;height:420px;background:var(--bg-canvas)"></div>
+            <div class="chart-legend" id="chartLegend">
+                <span id="legendOHLC" style="font-family:'JetBrains Mono';font-size:11px;color:var(--text-secondary)">Klik candle untuk detail</span>
+                <span id="chartLoading" style="font-size:11px;color:var(--text-muted)"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- TradingView Lightweight Charts -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+
+    <style>
+    /* Chart modal */
+    .chart-modal {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-bright);
+        border-radius: 16px;
+        width: 100%; max-width: 900px;
+        box-shadow: 0 40px 80px rgba(0,0,0,0.8);
+        overflow: hidden;
+        animation: modalIn 0.15s ease-out;
+    }
+    .chart-modal-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255,255,255,0.02);
+    }
+    .interval-tabs { display: flex; gap: 4px; }
+    .itab {
+        padding: 4px 12px; border-radius: 6px;
+        background: var(--bg-surface); border: 1px solid var(--border-bright);
+        color: var(--text-muted); font-size: 11px; font-weight: 600;
+        cursor: pointer; transition: all 0.12s; font-family: 'JetBrains Mono';
+    }
+    .itab:hover { color: var(--text-primary); background: var(--bg-hover); }
+    .itab-active { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
+    .chart-legend {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 8px 16px;
+        border-top: 1px solid var(--border);
+        background: rgba(255,255,255,0.02);
+        min-height: 34px;
+    }
+    /* Clickable symbol names in table */
+    .sym-link {
+        cursor: pointer;
+        font-weight: 700; color: #fff;
+        border-bottom: 1px dashed rgba(99,102,241,0.5);
+        transition: color 0.1s;
+        display: inline-block;
+    }
+    .sym-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
+    </style>
+
     <script>
     const API = window.location.origin + '/api/v1/crypto';
     let _positions = [];
     let _pendingId = null;
     let _refreshInterval = null;
+
+    // Chart state
+    let _chart = null;
+    let _candleSeries = null;
+    let _chartSymbol = null;
+    let _chartInterval = '15m';
+    let _chartLines = [];
 
     function $(id) { return document.getElementById(id); }
 
@@ -791,7 +876,9 @@
             return `
             <tr>
                 <td>
-                    <div style="font-weight:700;color:#fff">${pos.display || pos.symbol}</div>
+                    <div>
+                        <span class="sym-link" onclick="openChart('${pos.symbol}', '${pos.display || pos.symbol}', _positions.find(p=>p.symbol==='${pos.symbol}'))">${pos.display || pos.symbol}</span>
+                    </div>
                     <div style="font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono'">${pos.opened_at ? new Date(pos.opened_at).toLocaleString('id-ID',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'}) : '—'}</div>
                 </td>
                 <td>${modeBadge(pos.mode)}</td>
@@ -834,7 +921,7 @@
         }
         tbody.innerHTML = coins.map(c => `
             <tr>
-                <td style="font-weight:700;color:#fff">${c.display || c.symbol}</td>
+                <td><span class="sym-link" onclick="openChart('${c.symbol}', '${c.display || c.symbol}', null)">${c.display || c.symbol}</span></td>
                 <td><span class="score-pill">${Math.round(c.score)}</span></td>
                 <td class="price-cell">${c.price ? fmtNum(c.price, 6) : '—'}</td>
                 <td class="price-cell" style="color:var(--green)">${c.take_profit_1 ? fmtNum(c.take_profit_1, 6) : '—'}</td>
@@ -857,7 +944,7 @@
             const pct = t.pnl_pct;
             return `
             <tr>
-                <td style="font-weight:700;color:#fff">${t.display || t.symbol}</td>
+                <td><span class="sym-link" onclick="openChart('${t.symbol}', '${t.display || t.symbol}', null)">${t.display || t.symbol}</span></td>
                 <td>${modeBadge(t.mode)}</td>
                 <td class="price-cell">${t.entry_price != null ? fmtNum(t.entry_price, 6) : '—'}</td>
                 <td class="price-cell">${t.exit_price != null ? fmtNum(t.exit_price, 6) : '—'}</td>
@@ -980,6 +1067,172 @@
 
     // Close modal on overlay click
     $('closeModal').addEventListener('click', e => { if (e.target === $('closeModal')) closeModal(); });
+
+    // ── Chart functions ──────────────────────────────────────────────────────
+
+    function openChart(symbol, displayName, posData) {
+        _chartSymbol = symbol;
+        $('chartSymbolLabel').textContent = displayName || symbol;
+        $('chartModal').classList.remove('hidden');
+        // Reset interval active tab
+        document.querySelectorAll('.itab').forEach(b => {
+            b.classList.toggle('itab-active', b.dataset.iv === _chartInterval);
+        });
+        _loadChart(posData);
+    }
+
+    function closeChartModal() {
+        $('chartModal').classList.add('hidden');
+        if (_chart) { _chart.remove(); _chart = null; _candleSeries = null; _chartLines = []; }
+    }
+
+    function switchInterval(iv) {
+        _chartInterval = iv;
+        document.querySelectorAll('.itab').forEach(b => {
+            b.classList.toggle('itab-active', b.dataset.iv === iv);
+        });
+        // Find matching position for overlay lines
+        const pos = _positions.find(p => p.symbol === _chartSymbol);
+        _loadChart(pos || null);
+    }
+
+    async function _loadChart(posData) {
+        // Destroy previous chart instance
+        if (_chart) { _chart.remove(); _chart = null; _candleSeries = null; _chartLines = []; }
+
+        const container = $('chartContainer');
+        container.innerHTML = '';
+
+        $('chartLoading').textContent = '⏳ Memuat data...';
+        $('legendOHLC').textContent = '';
+
+        try {
+            const res = await fetch(API + '/klines/' + _chartSymbol + '?interval=' + _chartInterval + '&limit=200');
+            const json = await res.json();
+            if (json.status !== 'success' || !json.data || !json.data.candles || json.data.candles.length === 0) {
+                container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Tidak ada data candle tersedia untuk ' + _chartSymbol + '</div>';
+                $('chartLoading').textContent = '';
+                return;
+            }
+
+            const candles = json.data.candles;
+            const lastCandle = candles[candles.length - 1];
+
+            // Update price label
+            $('chartPriceLabel').textContent = fmtNum(lastCandle.close, 6) + ' USDT';
+
+            // Create chart
+            _chart = LightweightCharts.createChart(container, {
+                width: container.clientWidth,
+                height: 420,
+                layout: {
+                    background: { type: 'solid', color: '#070b13' },
+                    textColor: '#94a3b8',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 11,
+                },
+                grid: {
+                    vertLines: { color: 'rgba(255,255,255,0.05)' },
+                    horzLines: { color: 'rgba(255,255,255,0.05)' },
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: { color: 'rgba(99,102,241,0.5)', labelBackgroundColor: '#6366f1' },
+                    horzLine: { color: 'rgba(99,102,241,0.5)', labelBackgroundColor: '#6366f1' },
+                },
+                rightPriceScale: {
+                    borderColor: 'rgba(255,255,255,0.08)',
+                    textColor: '#94a3b8',
+                },
+                timeScale: {
+                    borderColor: 'rgba(255,255,255,0.08)',
+                    timeVisible: true,
+                    secondsVisible: false,
+                    fixLeftEdge: false,
+                    fixRightEdge: false,
+                },
+            });
+
+            // Resize observer
+            const ro = new ResizeObserver(() => {
+                if (_chart) _chart.applyOptions({ width: container.clientWidth });
+            });
+            ro.observe(container);
+
+            // Candlestick series
+            _candleSeries = _chart.addCandlestickSeries({
+                upColor: '#10d987',
+                downColor: '#f0374a',
+                borderUpColor: '#10d987',
+                borderDownColor: '#f0374a',
+                wickUpColor: '#10d987',
+                wickDownColor: '#f0374a',
+            });
+
+            const seriesData = candles.map(c => ({
+                time: Math.floor(c.openTime / 1000),
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+            }));
+            _candleSeries.setData(seriesData);
+            _chart.timeScale().fitContent();
+
+            // Price lines for TP / SL / Entry if posData is available
+            _chartLines = [];
+            if (posData) {
+                function addLine(price, color, label, dashed) {
+                    if (price == null) return;
+                    var line = _candleSeries.createPriceLine({
+                        price: price,
+                        color: color,
+                        lineWidth: 1,
+                        lineStyle: dashed ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+                        axisLabelVisible: true,
+                        title: label,
+                    });
+                    _chartLines.push(line);
+                }
+                addLine(posData.entry_price,    '#6366f1', 'Entry', false);
+                addLine(posData.take_profit_1,  '#10d987', 'TP1',   true);
+                addLine(posData.take_profit_2,  '#22d3ee', 'TP2',   true);
+                addLine(posData.stop_loss,       '#f0374a', 'SL',    true);
+            }
+
+            // Crosshair OHLC readout
+            _chart.subscribeCrosshairMove(function(param) {
+                if (!param || !param.seriesData) return;
+                var d = param.seriesData.get(_candleSeries);
+                if (!d) { $('legendOHLC').textContent = 'O: — H: — L: — C: — V: —'; return; }
+                var vol = candles.find(c => Math.floor(c.openTime/1000) === d.time);
+                var vStr = vol ? fmtNum(vol.volume, 2) : '—';
+                var chg = d.close >= d.open ? '+' : '';
+                var pct = d.open > 0 ? chg + ((d.close - d.open) / d.open * 100).toFixed(2) + '%' : '';
+                var col = d.close >= d.open ? '#10d987' : '#f0374a';
+                $('legendOHLC').innerHTML =
+                    '<span style="color:#94a3b8">O:</span> <span style="color:#fff">' + fmtNum(d.open,6) + '</span>  ' +
+                    '<span style="color:#94a3b8">H:</span> <span style="color:#10d987">' + fmtNum(d.high,6) + '</span>  ' +
+                    '<span style="color:#94a3b8">L:</span> <span style="color:#f0374a">' + fmtNum(d.low,6) + '</span>  ' +
+                    '<span style="color:#94a3b8">C:</span> <span style="color:#fff">' + fmtNum(d.close,6) + '</span>  ' +
+                    '<span style="color:' + col + '">' + pct + '</span>  ' +
+                    '<span style="color:#4b5a6e">Vol: ' + vStr + '</span>';
+            });
+
+            $('chartLoading').textContent = candles.length + ' candle';
+
+        } catch (err) {
+            container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f0374a;font-size:12px">Error: ' + err.message + '</div>';
+            $('chartLoading').textContent = '';
+        }
+    }
+
+    // ── Patch renderOpenTable to add sym-link ─────────────────────────────────
+    var _origRenderOpenTable = renderOpenTable;
+    function renderOpenTable(positions) {
+        _origRenderOpenTable(positions);
+        // Already embedded in the new version below - no-op
+    }
 
     // Initial load
     fetchAndRender();

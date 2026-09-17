@@ -558,13 +558,40 @@ async def crypto_manual_close_position(position_id: str):
     }
 
 
+@router.get("/klines/{symbol}")
+async def get_klines(symbol: str, interval: str = "15m", limit: int = 200):
+    """Return OHLCV candlestick data for a symbol.
+
+    Used by the dashboard chart modal. Cached for 30 s per (symbol, interval).
+    """
+    from app.data.tokocrypto_client import tokocrypto_client, TokocryptoSymbol
+
+    cache_key = f"klines:{symbol}:{interval}:{limit}"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        return {"status": "success", "data": cached}
+
+    try:
+        sym = TokocryptoSymbol(symbol)
+        candles = await tokocrypto_client.fetch_klines(sym, interval=interval, limit=limit)
+        payload = {"symbol": symbol, "interval": interval, "candles": candles}
+        await cache_service.set(cache_key, payload, ttl=30)
+        return {"status": "success", "data": payload}
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}, 400
+    except Exception as exc:
+        logger.warning(f"klines error for {symbol}: {exc}")
+        return {"status": "error", "message": "Failed to fetch klines"}, 502
+
+
 @router.get("/dashboard")
 async def crypto_dashboard_html():
     """Serve the crypto trading dashboard HTML page."""
     from fastapi.responses import HTMLResponse
     from pathlib import Path
-    
+
     template_path = Path(__file__).parent.parent.parent / "templates" / "crypto_dashboard.html"
     if template_path.exists():
         return HTMLResponse(content=template_path.read_text())
     return HTMLResponse(content="<h1>Dashboard template not found</h1>", status_code=500)
+
