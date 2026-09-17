@@ -135,6 +135,16 @@ class TokocryptoClient:
 
             await asyncio.sleep(2 ** attempt)  # exponential backoff between attempts
 
+        # If Tokocrypto endpoint failed (e.g. 429 rate limit), fallback to Binance Vision for standard market endpoints
+        if "tokocrypto.site" in url:
+            fallback_url = url.replace("https://www.tokocrypto.site", "https://data-api.binance.vision")
+            try:
+                resp = await client.get(fallback_url, params=params)
+                if resp.status_code == 200:
+                    return self._extract_data(resp.json(), fallback_url)
+            except Exception as fb_err:
+                logger.warning(f"Binance Vision fallback also failed for {fallback_url}: {fb_err}")
+
         raise TokocryptoResponseError(f"request failed after {self.max_retries} retries: {last_error}")
 
     @staticmethod

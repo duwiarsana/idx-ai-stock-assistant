@@ -55,35 +55,94 @@ async def crypto_scanner_latest(limit: int = 10):
 @router.get("/dashboard/potential")
 async def crypto_potential_coins(limit: int = 10, min_score: int = 55):
     """Get potential coins to buy - ranked by momentum score."""
-    results = crypto_scanner.state.get("last_results", [])
-    filtered = [r for r in results if r.get("score", 0) >= min_score]
-    sorted_results = sorted(filtered, key=lambda x: x.get("score", 0), reverse=True)[:limit]
-    
-    # Enrich with TP/SL levels
+    from sqlalchemy import select, desc
+    from app.db.session import async_session_factory
+    from app.models.crypto import CryptoScan
+    from app.services.crypto_levels import compute_price_levels
+
     enriched = []
-    for r in sorted_results:
-        levels = r.get("price_levels") or {}
-        enriched.append({
-            "symbol": r.get("symbol"),
-            "display": r.get("display"),
-            "score": round(r.get("score", 0), 2),
-            "price": r.get("tf_summaries", {}).get("1h", {}).get("price"),
-            "trend": r.get("tf_summaries", {}).get("1h", {}).get("trend"),
-            "momentum_score": round(r.get("scores", {}).get("momentum", 0), 2),
-            "buy_reason": r.get("ai_verdict", {}).get("reason", [])[:3],
-            "entry_level": levels.get("entry"),
-            "take_profit_1": levels.get("take_profit_1"),
-            "take_profit_2": levels.get("take_profit_2"),
-            "stop_loss": levels.get("stop_loss"),
-            "risk_reward": levels.get("risk_reward"),
-            "recommended_allocation": "5-10% of portfolio",
-        })
-    
+    total_candidates = 0
+    last_scan_at = None
+
+    try:
+        async with async_session_factory() as session:
+            # Find the most recent scan batch time
+            latest_time_res = await session.execute(
+                select(CryptoScan.created_at).order_by(desc(CryptoScan.created_at)).limit(1)
+            )
+            latest_created = latest_time_res.scalar_one_or_none()
+
+            if latest_created:
+                last_scan_at = latest_created.isoformat()
+                # Fetch all scans from this latest batch (within 2 minutes of the newest record)
+                from datetime import timedelta
+                time_window = latest_created - timedelta(minutes=2)
+                scans_res = await session.execute(
+                    select(CryptoScan)
+                    .where(CryptoScan.created_at >= time_window)
+                    .order_by(desc(CryptoScan.score))
+                )
+                scans = scans_res.scalars().all()
+                filtered = [s for s in scans if (s.score or 0) >= min_score]
+                total_candidates = len(filtered)
+
+                for s in filtered[:limit]:
+                    tf = s.indicator_summary or {}
+                    s1h = tf.get("1h") or {}
+                    scores = s.score_breakdown or {}
+                    verdict = s.ai_verdict or {}
+                    # Compute reference levels from indicator summary
+                    levels = compute_price_levels(tf, [])
+
+                    enriched.append({
+                        "symbol": s.symbol,
+                        "display": s.display or s.symbol,
+                        "score": round(s.score or 0, 2),
+                        "price": s.price or s1h.get("price"),
+                        "trend": s1h.get("trend") or "bullish",
+                        "momentum_score": round(scores.get("momentum", 0), 2),
+                        "buy_reason": (verdict.get("reason") or ["Sinyal momentum breakout"])[:3],
+                        "entry_level": levels.entry or s.price,
+                        "take_profit_1": levels.take_profit_1,
+                        "take_profit_2": levels.take_profit_2,
+                        "stop_loss": levels.stop_loss,
+                        "risk_reward": levels.risk_reward,
+                        "recommended_allocation": "5-10% of portfolio",
+                    })
+    except Exception as e:
+        logger.warning(f"Failed to load potential coins from DB: {e}")
+
+    # Fallback to in-memory state if DB query produced nothing
+    if not enriched:
+        results = crypto_scanner.state.get("last_results", [])
+        filtered = [r for r in results if r.get("score", 0) >= min_score]
+        sorted_results = sorted(filtered, key=lambda x: x.get("score", 0), reverse=True)[:limit]
+        total_candidates = len(filtered)
+        last_scan_at = crypto_scanner.state.get("last_scan_at")
+
+        for r in sorted_results:
+            levels = r.get("price_levels") or {}
+            enriched.append({
+                "symbol": r.get("symbol"),
+                "display": r.get("display"),
+                "score": round(r.get("score", 0), 2),
+                "price": r.get("tf_summaries", {}).get("1h", {}).get("price"),
+                "trend": r.get("tf_summaries", {}).get("1h", {}).get("trend"),
+                "momentum_score": round(r.get("scores", {}).get("momentum", 0), 2),
+                "buy_reason": (r.get("ai_verdict", {}).get("reason") or [])[:3],
+                "entry_level": levels.get("entry"),
+                "take_profit_1": levels.get("take_profit_1"),
+                "take_profit_2": levels.get("take_profit_2"),
+                "stop_loss": levels.get("stop_loss"),
+                "risk_reward": levels.get("risk_reward"),
+                "recommended_allocation": "5-10% of portfolio",
+            })
+
     return {
         "status": "success",
         "data": {
-            "last_scan_at": crypto_scanner.state.get("last_scan_at"),
-            "total_candidates": len(filtered),
+            "last_scan_at": last_scan_at,
+            "total_candidates": total_candidates,
             "showing": len(enriched),
             "min_score_filter": min_score,
             "coins": enriched,
