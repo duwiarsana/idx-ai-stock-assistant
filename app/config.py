@@ -254,8 +254,9 @@ class Settings(BaseSettings):
     crypto_real_bep_enabled: bool = True
     # Profit % above entry needed to trigger auto-BEP (default 0.8% or 50% to TP1).
     crypto_real_bep_trigger_pct: float = 0.8
-    # Dynamic offset % to cover round-trip fee + slippage (0.15% = 0.0015).
-    crypto_real_bep_buffer_pct: float = 0.15
+    # Dynamic offset % to cover round-trip fee (0.20%) + market sell slippage (0.25%).
+    # Total offset 0.45% ensures positions stopped out at BEP remain safely net-profitable.
+    crypto_real_bep_buffer_pct: float = 0.45
 
     # ── Freqtrade-style exits: trailing stop + dynamic ROI ────────────
     # Trailing master switch. True = legacy behaviour (trail from entry at the

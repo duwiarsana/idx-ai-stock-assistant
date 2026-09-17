@@ -1091,13 +1091,14 @@ class RealTrader:
             if side == "LONG"
             else ((pos.entry_price - current_price) / pos.entry_price * 100)
         ) if pos.entry_price else 0
+        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.45)
         text = (
             "🛡️ *REAL AUTO-BEP ACTIVATED* (uang sungguhan)\n\n"
             f"🔹 {pos.display or pos.symbol} ({side})\n"
             f"💵 Entry: {_fmt_price(pos.entry_price)} {pos.quote}\n"
             f"📈 Harga Saat Ini: {_fmt_price(current_price)} {pos.quote} ({profit_pct:+.2f}%)\n"
-            f"🔒 SL Baru (BEP Lock): {_fmt_price(bep_price)} {pos.quote}\n\n"
-            "✨ *Stop-Loss disesuaikan menutup round-trip fee (0.10%) + buffer slippage (0.05%).*\n"
+            f"🔒 SL Baru (BEP Lock): {_fmt_price(bep_price)} {pos.quote} (+{buffer_pct:.2f}%)\n\n"
+            f"✨ *Stop-Loss disesuaikan menutup round-trip fee (0.20%) + buffer slippage ({max(0.0, buffer_pct - 0.20):.2f}%).*\n"
             "Posisi kini telah RISK-FREE!"
         )
         text += await self._portfolio_summary(pos.quote)
@@ -1113,7 +1114,7 @@ class RealTrader:
             return
 
         trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 0.8)
-        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.15)
+        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.45)
         side = (getattr(pos, "side", None) or getattr(pos, "direction", "LONG") or "LONG").upper()
         tp1 = getattr(pos, "take_profit_1", None)
 

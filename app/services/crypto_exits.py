@@ -77,14 +77,14 @@ def trailing_stop_effective(pos, price: float, settings=None) -> tuple[Optional[
     # ── Auto BEP (Break-Even Point) ──────────────────────────────────
     # If auto-BEP is enabled and peak profit touches bep_trigger_pct (or 50% to TP1),
     # establish a baseline stop-loss at:
-    # - LONG : entry * (1 + bep_buffer_pct/100) (default +0.15% offset)
-    # - SHORT: entry * (1 - bep_buffer_pct/100) (default -0.15% offset)
-    # This guarantees that once in profit, the SL covers round-trip fees (0.05% open + 0.05% close)
-    # plus slippage (0.05%) for a true risk-free break-even.
+    # - LONG : entry * (1 + bep_buffer_pct/100) (default +0.45% offset)
+    # - SHORT: entry * (1 - bep_buffer_pct/100) (default -0.45% offset)
+    # This guarantees that once in profit, the SL covers round-trip fees (0.10% open + 0.10% close = 0.20%)
+    # plus market sell slippage (0.25%) for a true risk-free break-even.
     bep_floor: Optional[float] = None
     if getattr(settings, "crypto_real_bep_enabled", False) and entry:
         trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 0.8)
-        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.15)
+        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.45)
         side = (getattr(pos, "side", None) or getattr(pos, "direction", "LONG") or "LONG").upper()
         tp1 = getattr(pos, "take_profit_1", None)
 

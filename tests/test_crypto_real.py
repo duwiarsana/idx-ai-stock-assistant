@@ -590,7 +590,8 @@ async def test_close_position_places_market_sell(monkeypatch, make_candidate):
     assert sold["symbol"] == "SOL_USDT"
     assert sold["quantity"] == 0.1
     assert pos.status == "CLOSED"
-    assert pos.realized_pnl == pytest.approx(-1.0, abs=0.01)
+    # pnl = (proceeds 17.0 - est_exit_fee 0.017) - cost_basis 18.0 = -1.017
+    assert pos.realized_pnl == pytest.approx(-1.017, abs=0.01)
     assert pos.exit_reason == "SL"
 
 
