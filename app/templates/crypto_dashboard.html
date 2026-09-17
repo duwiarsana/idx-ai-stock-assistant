@@ -1219,7 +1219,7 @@
                 $('legendOHLC').innerHTML =
                     '<span style="color:#94a3b8">O:</span> <span style="color:#fff">' + fmtNum(d.open,6) + '</span>  ' +
                     '<span style="color:#94a3b8">H:</span> <span style="color:#10d987">' + fmtNum(d.high,6) + '</span>  ' +
-                    '<span style="color:#94a3b8">L:</span> <span style="color:#f0374a">' + fmtNum(d.low,6) + '</span>  ' +
+                    '<span style="color:#f0374a">L:</span> <span style="color:#f0374a">' + fmtNum(d.low,6) + '</span>  ' +
                     '<span style="color:#94a3b8">C:</span> <span style="color:#fff">' + fmtNum(d.close,6) + '</span>  ' +
                     '<span style="color:' + col + '">' + pct + '</span>  ' +
                     '<span style="color:#4b5a6e">Vol: ' + vStr + '</span>';
@@ -1228,6 +1228,7 @@
             $('chartLoading').textContent = candles.length + ' candle';
 
         } catch (err) {
+            console.error('Chart Load Error:', err);
             container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f0374a;font-size:12px">Error: ' + err.message + '</div>';
             $('chartLoading').textContent = '';
         }
