@@ -273,11 +273,9 @@ async def crypto_positions_summary():
         usdt_balance = 0.0
         try:
             trade_client = TokoCryptoTradeClient()
-            acc = await trade_client.fetch_account_info()
-            for bal in acc.get("balances", []):
-                if bal.get("asset") == "USDT":
-                    usdt_balance = float(bal.get("free", 0))
-                    break
+            balance = await trade_client.get_balance("USDT")
+            if balance is not None:
+                usdt_balance = float(balance)
         except Exception as e:
             logger.warning(f"Failed to fetch USDT balance: {e}")
             
