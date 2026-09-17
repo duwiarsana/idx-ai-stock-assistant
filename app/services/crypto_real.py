@@ -936,7 +936,11 @@ class RealTrader:
         return False
 
     async def _in_sl_cooldown(self, session, symbol: str) -> bool:
-        """Check if symbol is in SL cooldown period."""
+        """Check if symbol is in SL or MANUAL cooldown period.
+        
+        Manual closes also trigger the cooldown to prevent the bot from
+        immediately re-buying a coin the user just intentionally closed.
+        """
         from datetime import datetime, timedelta, timezone
         from sqlalchemy import select
         from app.models.crypto import CryptoPaperPosition
@@ -951,14 +955,16 @@ class RealTrader:
             select(CryptoPaperPosition.closed_at).where(
                 CryptoPaperPosition.symbol == symbol,
                 CryptoPaperPosition.mode == "REAL",
-                # Cover both clean stop-outs and dust force-closes (SL_DUST) —
-                # dust exits used to bypass the cooldown and re-enter instantly.
-                CryptoPaperPosition.exit_reason.in_(["SL", "SL_DUST"]),
+                # Cover both clean stop-outs, dust force-closes, AND manual closes.
+                # Manual exits also trigger cooldown — if user intentionally closed a
+                # position, we should NOT immediately re-enter the same coin.
+                CryptoPaperPosition.exit_reason.in_(["SL", "SL_DUST", "MANUAL"]),
                 CryptoPaperPosition.closed_at >= cutoff,
             ).order_by(CryptoPaperPosition.closed_at.desc()).limit(1)
         )
         row = result.first()
         return row is not None
+
 
     async def _real_balance(self, quote: str) -> Optional[float]:
         try:
