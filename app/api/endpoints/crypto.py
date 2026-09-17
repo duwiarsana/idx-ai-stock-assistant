@@ -567,7 +567,7 @@ async def get_klines(symbol: str, interval: str = "15m", limit: int = 200):
     from app.data.tokocrypto_client import tokocrypto_client, TokocryptoSymbol
 
     cache_key = f"klines:{symbol}:{interval}:{limit}"
-    cached = await cache_service.get(cache_key)
+    cached = await cache_service._get(cache_key)
     if cached:
         return {"status": "success", "data": cached}
 
@@ -575,7 +575,7 @@ async def get_klines(symbol: str, interval: str = "15m", limit: int = 200):
         sym = TokocryptoSymbol(symbol)
         candles = await tokocrypto_client.fetch_klines(sym, interval=interval, limit=limit)
         payload = {"symbol": symbol, "interval": interval, "candles": candles}
-        await cache_service.set(cache_key, payload, ttl=30)
+        await cache_service._set(cache_key, payload, ttl=30)
         return {"status": "success", "data": payload}
     except ValueError as exc:
         return {"status": "error", "message": str(exc)}, 400
