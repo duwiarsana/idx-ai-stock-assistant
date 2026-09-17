@@ -183,26 +183,44 @@ async def crypto_positions_summary():
         for p in open_positions:
             open_count_by_mode[p.mode] = open_count_by_mode.get(p.mode, 0) + 1
         
-        # Enrich open positions with current prices and unrealized PnL
+        # Enrich open positions with current prices and unrealized PnL (gross & net after fee)
         open_data = []
         for p in open_positions:
             current_price = await get_current_price(p.symbol)
-            unrealized_pnl = 0
-            unrealized_pnl_pct = 0
-            if current_price > 0 and p.entry_price > 0:
-                unrealized_pnl = (current_price - p.entry_price) * p.quantity
-                unrealized_pnl_pct = ((current_price - p.entry_price) / p.entry_price) * 100
-            
+            unrealized_pnl = 0.0
+            unrealized_pnl_pct = 0.0
+            est_fee = 0.0
+            net_pnl = 0.0
+            net_pnl_pct = 0.0
+            is_profitable_net = False
+
+            if current_price > 0 and p.entry_price > 0 and p.quantity > 0:
+                gross_value = current_price * p.quantity
+                unrealized_pnl = gross_value - p.invested
+                unrealized_pnl_pct = (unrealized_pnl / p.invested) * 100 if p.invested > 0 else 0.0
+                
+                # Standard Tokocrypto / Binance taker fee is 0.1% (0.001)
+                est_fee = gross_value * 0.001
+                net_proceeds = gross_value - est_fee
+                net_pnl = net_proceeds - p.invested
+                net_pnl_pct = (net_pnl / p.invested) * 100 if p.invested > 0 else 0.0
+                is_profitable_net = net_pnl > 0.0
+
             open_data.append({
+                "id": str(p.id),
                 "symbol": p.symbol,
                 "display": p.display,
                 "mode": p.mode,
                 "entry_price": round(p.entry_price, 6),
                 "current_price": round(current_price, 6) if current_price > 0 else None,
-                "quantity": round(p.quantity, 4),
+                "quantity": round(p.quantity, 6),
                 "invested": round(p.invested, 2),
                 "unrealized_pnl": round(unrealized_pnl, 4),
                 "unrealized_pnl_pct": round(unrealized_pnl_pct, 2),
+                "estimated_exit_fee": round(est_fee, 4),
+                "net_pnl": round(net_pnl, 4),
+                "net_pnl_pct": round(net_pnl_pct, 2),
+                "is_profitable_net": is_profitable_net,
                 "take_profit_1": round(p.take_profit_1, 6) if p.take_profit_1 else None,
                 "take_profit_2": round(p.take_profit_2, 6) if p.take_profit_2 else None,
                 "stop_loss": round(p.stop_loss, 6) if p.stop_loss else None,
@@ -446,6 +464,98 @@ async def crypto_paper_history(limit: int = 20):
         logger.warning(f"Failed to load paper history: {e}")
         data = []
     return {"status": "success", "data": data}
+
+
+@router.post("/positions/{position_id}/close")
+async def crypto_manual_close_position(position_id: str):
+    """Manually close an open crypto position (REAL or PAPER) at current market price."""
+    import uuid
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.db.session import async_session_factory
+    from app.models.crypto import CryptoPaperPosition, CryptoPaperAccount
+    from app.services.crypto_real import real_trader, EXIT_MANUAL as REAL_EXIT_MANUAL
+    from app.services.crypto_paper import paper_trader, EXIT_MANUAL as PAPER_EXIT_MANUAL
+
+    try:
+        pos_uuid = uuid.UUID(position_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid position ID format")
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(CryptoPaperPosition).where(
+                CryptoPaperPosition.id == pos_uuid,
+                CryptoPaperPosition.status == "OPEN",
+            )
+        )
+        pos = result.scalar_one_or_none()
+        if not pos:
+            raise HTTPException(status_code=404, detail="Open position not found or already closed")
+
+        # Get latest market price
+        current_price = 0.0
+        try:
+            if pos.mode == "REAL":
+                current_price = await real_trader.client.get_price(pos.symbol)
+            else:
+                current_price = await paper_trader.client.get_price(pos.symbol)
+        except Exception as e:
+            logger.warning(f"Could not fetch current price from exchange for {pos.symbol}: {e}")
+
+        if not current_price or current_price <= 0:
+            if pos.symbol in _PRICE_CACHE:
+                current_price = _PRICE_CACHE[pos.symbol][0]
+            if not current_price or current_price <= 0:
+                current_price = pos.entry_price
+
+        # Fetch corresponding account
+        acct_res = await session.execute(
+            select(CryptoPaperAccount).where(CryptoPaperAccount.quote_asset == pos.quote)
+        )
+        account = acct_res.scalar_one_or_none()
+        if not account:
+            account = CryptoPaperAccount(
+                quote_asset=pos.quote,
+                initial_balance=0.0,
+                cash_balance=0.0,
+            )
+            session.add(account)
+            await session.flush()
+
+        mode = pos.mode
+        symbol = pos.symbol
+        display = pos.display or pos.symbol
+
+        if mode == "REAL":
+            closed = await real_trader._close_position(
+                session, pos, account, REAL_EXIT_MANUAL, current_price
+            )
+            if not closed:
+                await session.rollback()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Gagal melakukan eksekusi sell REAL di exchange untuk {symbol}",
+                )
+        else:
+            await paper_trader._close_position(
+                session, pos, account, PAPER_EXIT_MANUAL, current_price
+            )
+
+        await session.commit()
+
+    logger.info(f"Manual close executed successfully for {symbol} ({mode}) @ {current_price}")
+    return {
+        "status": "success",
+        "message": f"Posisi {display} ({mode}) berhasil di-close manual pada harga {current_price}",
+        "data": {
+            "position_id": position_id,
+            "symbol": symbol,
+            "mode": mode,
+            "exit_price": current_price,
+            "realized_pnl": pos.realized_pnl,
+        },
+    }
 
 
 @router.get("/dashboard")

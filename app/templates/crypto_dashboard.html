@@ -3,353 +3,690 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🤖 IDX AI Stock Assistant - Crypto Dashboard</title>
+    <title>🤖 IDX AI Crypto Trading Terminal & Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-        .card { transition: transform 0.2s, box-shadow 0.2s; }
-        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        .pulse { animation: pulse 2s infinite; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #0b0f19;
+            color: #f1f5f9;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-card {
+            background: rgba(23, 32, 54, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: all 0.2s ease;
+        }
+        .glass-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(99, 102, 241, 0.35);
+            box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.5);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        .pulse-live {
+            animation: pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.92); }
         }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <!-- Header -->
-    <div class="gradient-bg text-white py-6 shadow-lg">
-        <div class="container mx-auto px-4">
-            <div class="flex items-center justify-between">
+<body class="min-h-screen text-slate-100 antialiased selection:bg-indigo-500 selection:text-white pb-16">
+
+    <!-- Top Navigation / Header -->
+    <header class="border-b border-slate-800/80 bg-slate-950/80 sticky top-0 z-40 backdrop-blur-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 text-xl">
+                    ⚡
+                </div>
                 <div>
-                    <h1 class="text-3xl font-bold">🤖 IDX AI Stock Assistant</h1>
-                    <p class="text-blue-100 mt-1">Crypto Trading Dashboard</p>
-                </div>
-                <div class="text-right">
                     <div class="flex items-center space-x-2">
-                        <div class="w-3 h-3 bg-green-400 rounded-full pulse"></div>
-                        <span class="text-sm">Live</span>
-                        <span class="text-xs text-gray-400" id="lastUpdate">-</span>
+                        <h1 class="text-lg font-bold tracking-tight text-white">IDX AI Trading Terminal</h1>
+                        <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">TOKOCRYPTO</span>
                     </div>
-                    <button onclick="refreshData()" class="mt-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition">
-                        🔄 Refresh
-                    </button>
+                    <p class="text-xs text-slate-400">Automated Scalping, BEP Protection & Real-time Execution</p>
                 </div>
+            </div>
+            
+            <div class="flex items-center space-x-3 sm:space-x-4">
+                <div class="hidden sm:flex items-center space-x-2 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-live"></span>
+                    <span class="text-xs font-medium text-slate-300">Live System</span>
+                    <span class="text-slate-600">|</span>
+                    <span class="text-xs font-mono text-slate-400" id="lastUpdate">Loading...</span>
+                </div>
+                
+                <button id="refreshBtn" onclick="manualRefresh()" class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 transition shadow-lg shadow-indigo-600/20 text-white">
+                    <span id="refreshIcon">🔄</span>
+                    <span id="refreshText">Refresh</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+        <!-- Loading State -->
+        <div id="loading" class="text-center py-24">
+            <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-indigo-500/20 border-t-indigo-500"></div>
+            <p class="text-slate-400 text-sm mt-4 font-medium">Menghubungkan ke Exchange & Database...</p>
+        </div>
+
+        <!-- Dashboard Content -->
+        <div id="dashboard" class="hidden space-y-6">
+
+            <!-- Summary Cards Row -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- Total Invested -->
+                <div class="glass-card rounded-2xl p-5 relative overflow-hidden">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-medium uppercase tracking-wider text-slate-400">Total Modal Aktif</p>
+                            <h3 class="text-2xl font-extrabold text-white mt-1 mono" id="totalInvested">0.00 USDT</h3>
+                            <p class="text-xs text-slate-400 mt-1" id="openPositionsCount">-</p>
+                        </div>
+                        <div class="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-400 text-xl">
+                            💼
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Open PnL Net (Est sesudah fee) -->
+                <div class="glass-card rounded-2xl p-5 relative overflow-hidden">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="flex items-center space-x-1.5">
+                                <p class="text-xs font-medium uppercase tracking-wider text-slate-400">Unrealized Net PnL</p>
+                                <span class="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono" title="Sudah dikurangi fee exit 0.1%">Net Fee</span>
+                            </div>
+                            <h3 class="text-2xl font-extrabold mt-1 mono" id="totalNetPnL">0.00 USDT</h3>
+                            <p class="text-xs text-slate-400 mt-1" id="totalGrossPnL">Gross: -</p>
+                        </div>
+                        <div class="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xl" id="netPnlIconBox">
+                            📈
+                        </div>
+                    </div>
+                </div>
+
+                <!-- REAL Account Performance -->
+                <div class="glass-card rounded-2xl p-5 relative overflow-hidden border-rose-500/20">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">REAL MONEY</span>
+                                <p class="text-xs font-medium uppercase tracking-wider text-slate-400">Closed PnL</p>
+                            </div>
+                            <h3 class="text-2xl font-extrabold mt-1 mono" id="realPnL">0.00 USDT</h3>
+                            <p class="text-xs text-slate-400 mt-1" id="realWinRate">-</p>
+                        </div>
+                        <div class="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xl">
+                            💰
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PAPER Account Performance -->
+                <div class="glass-card rounded-2xl p-5 relative overflow-hidden border-cyan-500/20">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">PAPER</span>
+                                <p class="text-xs font-medium uppercase tracking-wider text-slate-400">Closed PnL</p>
+                            </div>
+                            <h3 class="text-2xl font-extrabold mt-1 mono" id="paperPnL">0.00 USDT</h3>
+                            <p class="text-xs text-slate-400 mt-1" id="paperWinRate">-</p>
+                        </div>
+                        <div class="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400 text-xl">
+                            🧪
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 1: POSISI TERBUKA (OPEN POSITIONS) & MANUAL CLOSE -->
+            <div class="glass-panel rounded-2xl overflow-hidden shadow-2xl">
+                <div class="px-6 py-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/40">
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <h2 class="text-base font-bold text-white flex items-center">
+                                <span class="mr-2">⚡</span> Posisi Terbuka (Active Trades)
+                            </h2>
+                            <span id="openBadgeCount" class="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">0</span>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-0.5">Pantau estimasi keuntungan bersih sesudah fee dan eksekusi manual exit kapan saja.</p>
+                    </div>
+
+                    <div class="flex items-center space-x-2 text-xs text-slate-400 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800/80">
+                        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+                        <span>Fee Tokocrypto dihitung: <strong>0.1% Taker Exit</strong></span>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto custom-scrollbar">
+                    <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="bg-slate-950/50 text-slate-400 text-[11px] font-semibold uppercase tracking-wider border-b border-slate-800/60">
+                            <tr>
+                                <th class="px-5 py-3.5">Aset / Mode</th>
+                                <th class="px-4 py-3.5">Harga Entry</th>
+                                <th class="px-4 py-3.5">Harga Terkini</th>
+                                <th class="px-4 py-3.5">Modal (Qty)</th>
+                                <th class="px-4 py-3.5">Gross PnL</th>
+                                <th class="px-4 py-3.5">Est. Fee Exit</th>
+                                <th class="px-5 py-3.5">Status Keuntungan (Net Fee)</th>
+                                <th class="px-4 py-3.5">Target TP 1 / 2</th>
+                                <th class="px-4 py-3.5">Stop Loss / BEP</th>
+                                <th class="px-5 py-3.5 text-center">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="openTable" class="divide-y divide-slate-800/40">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- SECTION 2: SCREENER POTENSI BELI (SCANNER CANDIDATES) -->
+            <div class="glass-panel rounded-2xl overflow-hidden shadow-2xl">
+                <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/40">
+                    <div>
+                        <h2 class="text-base font-bold text-white flex items-center">
+                            <span class="mr-2">🎯</span> Sinyal Potensi Beli (Score &ge; 55)
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Kandidat koin momentum hasil scanner yang memenuhi kriteria pullback & volume breakout.</p>
+                    </div>
+                    <span id="candidatesCount" class="text-xs font-mono px-2.5 py-1 rounded bg-slate-800 text-slate-300">-</span>
+                </div>
+
+                <div class="overflow-x-auto custom-scrollbar">
+                    <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="bg-slate-950/50 text-slate-400 text-[11px] font-semibold uppercase tracking-wider border-b border-slate-800/60">
+                            <tr>
+                                <th class="px-5 py-3.5">Coin</th>
+                                <th class="px-4 py-3.5">Score</th>
+                                <th class="px-4 py-3.5">Harga Saat Scan</th>
+                                <th class="px-4 py-3.5">Target TP1</th>
+                                <th class="px-4 py-3.5">Target TP2</th>
+                                <th class="px-4 py-3.5">Stop Loss</th>
+                                <th class="px-4 py-3.5">R:R Ratio</th>
+                                <th class="px-5 py-3.5">Alasan Masuk (Reason)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="potentialTable" class="divide-y divide-slate-800/40">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- SECTION 3: RIWAYAT TRANSAKSI TERAKHIR (CLOSED POSITIONS) -->
+            <div class="glass-panel rounded-2xl overflow-hidden shadow-2xl">
+                <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/40">
+                    <div>
+                        <h2 class="text-base font-bold text-white flex items-center">
+                            <span class="mr-2">📜</span> Riwayat Transaksi Tertutup (Closed History)
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">20 Transaksi terakhir yang ditutup via TP1, TP2, Stop-Loss, Dynamic ROI, atau Manual Close.</p>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto custom-scrollbar">
+                    <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="bg-slate-950/50 text-slate-400 text-[11px] font-semibold uppercase tracking-wider border-b border-slate-800/60">
+                            <tr>
+                                <th class="px-5 py-3.5">Coin</th>
+                                <th class="px-4 py-3.5">Mode</th>
+                                <th class="px-4 py-3.5">Harga Entry</th>
+                                <th class="px-4 py-3.5">Harga Exit</th>
+                                <th class="px-4 py-3.5">Realized PnL</th>
+                                <th class="px-4 py-3.5">Hasil (%)</th>
+                                <th class="px-4 py-3.5">Alasan Exit</th>
+                                <th class="px-5 py-3.5">Waktu Tutup</th>
+                            </tr>
+                        </thead>
+                        <tbody id="closedTable" class="divide-y divide-slate-800/40">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Confirmation Modal for Manual Close -->
+    <div id="closeModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm hidden p-4">
+        <div class="glass-panel border border-slate-700 max-w-md w-full rounded-2xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+            <div class="flex items-center space-x-3 mb-4">
+                <div class="w-10 h-10 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center text-xl font-bold">
+                    ⚠️
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white" id="modalTitle">Konfirmasi Manual Close</h3>
+                    <p class="text-xs text-slate-400">Order Market Sell akan langsung dikirim ke exchange</p>
+                </div>
+            </div>
+
+            <div class="bg-slate-950/70 rounded-xl p-4 border border-slate-800/80 mb-5 space-y-2.5 text-xs">
+                <div class="flex justify-between">
+                    <span class="text-slate-400">Aset:</span>
+                    <span class="font-bold text-white mono" id="modalSymbol">-</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-slate-400">Mode Eksekusi:</span>
+                    <span id="modalMode">-</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-slate-400">Harga Entry:</span>
+                    <span class="text-slate-200 mono" id="modalEntryPrice">-</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-slate-400">Harga Terkini:</span>
+                    <span class="text-slate-200 mono" id="modalCurrentPrice">-</span>
+                </div>
+                <div class="border-t border-slate-800 pt-2 flex justify-between">
+                    <span class="text-slate-400">Estimasi Fee Exit (0.1%):</span>
+                    <span class="text-amber-400 mono" id="modalFee">-</span>
+                </div>
+                <div class="border-t border-slate-800 pt-2 flex justify-between items-center">
+                    <span class="font-semibold text-slate-300">Estimasi Hasil Bersih (Net):</span>
+                    <span class="text-sm font-extrabold mono" id="modalNetPnL">-</span>
+                </div>
+                <div id="modalNetVerdict" class="p-2 rounded-lg text-center font-medium mt-2">
+                    <!-- Net verdict banner -->
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3">
+                <button onclick="closeModalWindow()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 transition">
+                    Batal
+                </button>
+                <button id="confirmCloseBtn" onclick="executeManualClose()" class="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 active:bg-rose-700 shadow-lg shadow-rose-600/30 transition flex items-center space-x-1.5">
+                    <span id="confirmCloseBtnText">Tutup Posisi Sekarang</span>
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- Main Content -->
-    <div class="container mx-auto px-4 py-8">
-        <!-- Loading -->
-        <div id="loading" class="text-center py-12">
-            <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 mx-auto"></div>
-            <p class="text-gray-600 mt-4">Loading data...</p>
-        </div>
-
-        <!-- Dashboard Content -->
-        <div id="dashboard" class="hidden">
-            <!-- Stats Overview -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                <div class="card bg-white rounded-xl shadow-md p-6">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-gray-500 text-sm">Total Invested</p>
-                            <p class="text-2xl font-bold text-gray-800" id="totalInvested">-</p>
-                        </div>
-                        <div class="bg-blue-100 p-3 rounded-lg">
-                            <span class="text-2xl">💰</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="card bg-white rounded-xl shadow-md p-6">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-gray-500 text-sm">Open Positions</p>
-                            <p class="text-2xl font-bold text-gray-800" id="openPositions">-</p>
-                        </div>
-                        <div class="bg-purple-100 p-3 rounded-lg">
-                            <span class="text-2xl">📊</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="card bg-white rounded-xl shadow-md p-6">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-gray-500 text-sm">PnL REAL 🔴</p>
-                            <p class="text-2xl font-bold" id="realPnL">-</p>
-                            <p class="text-xs text-gray-500 mt-1" id="realWinRate">-</p>
-                        </div>
-                        <div class="bg-red-100 p-3 rounded-lg">
-                            <span class="text-2xl">💸</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="card bg-white rounded-xl shadow-md p-6">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-gray-500 text-sm">PnL PAPER 🔵</p>
-                            <p class="text-2xl font-bold" id="paperPnL">-</p>
-                            <p class="text-xs text-gray-500 mt-1" id="paperWinRate">-</p>
-                        </div>
-                        <div class="bg-blue-100 p-3 rounded-lg">
-                            <span class="text-2xl">🧪</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Potential Coins -->
-            <div class="bg-white rounded-xl shadow-md p-6 mb-8">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-xl font-bold text-gray-800">🎯 Potensi Beli (Score ≥55)</h2>
-                    <span class="text-sm text-gray-500" id="candidatesCount">-</span>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Coin</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Score</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Price</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">TP1</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">TP2</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">SL</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">R:R</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Reason</th>
-                            </tr>
-                        </thead>
-                        <tbody id="potentialTable" class="divide-y divide-gray-100">
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Open Positions -->
-            <div class="bg-white rounded-xl shadow-md p-6 mb-8">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-xl font-bold text-gray-800">📊 Posisi Terbuka</h2>
-                    <span class="text-sm text-gray-500" id="totalUnrealizedPnL">-</span>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Coin</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Mode</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Entry</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Current</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Invested</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Unrealized PnL</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">TP1</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">TP2</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">SL</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Score</th>
-                            </tr>
-                        </thead>
-                        <tbody id="openTable" class="divide-y divide-gray-100">
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Recent Trades -->
-            <div class="bg-white rounded-xl shadow-md p-6 mb-8">
-                <h2 class="text-xl font-bold text-gray-800 mb-6">💰 Transaksi Terakhir</h2>
-                <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Coin</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Mode</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Entry</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Exit</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">PnL</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">PnL %</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Reason</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">Date</th>
-                            </tr>
-                        </thead>
-                        <tbody id="closedTable" class="divide-y divide-gray-100">
-                        </tbody>
-                    </table>
-                </div>
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 z-50 hidden max-w-sm w-full glass-panel border border-slate-700 p-4 rounded-xl shadow-2xl text-xs transition-all">
+        <div class="flex items-center space-x-3">
+            <span id="toastIcon" class="text-xl">✅</span>
+            <div class="flex-1">
+                <p id="toastTitle" class="font-bold text-white"></p>
+                <p id="toastMessage" class="text-slate-400 mt-0.5"></p>
             </div>
         </div>
     </div>
 
     <script>
         const API_BASE = window.location.origin + '/api/v1/crypto';
-        
+        let activePositionsData = [];
+        let pendingClosePositionId = null;
+
+        function showToast(title, message, isSuccess = true) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastTitle').textContent = title;
+            document.getElementById('toastMessage').textContent = message;
+            document.getElementById('toastIcon').textContent = isSuccess ? '✅' : '❌';
+            toast.className = `fixed bottom-5 right-5 z-50 max-w-sm w-full glass-panel border ${isSuccess ? 'border-emerald-500/50' : 'border-rose-500/50'} p-4 rounded-xl shadow-2xl text-xs transition-all block`;
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 5000);
+        }
+
         async function fetchData() {
             try {
                 const [potentialRes, positionsRes] = await Promise.all([
                     fetch(`${API_BASE}/dashboard/potential?limit=10&min_score=55`),
                     fetch(`${API_BASE}/dashboard/positions`)
                 ]);
-                
+
+                if (!potentialRes.ok || !positionsRes.ok) {
+                    throw new Error('Gagal memuat API endpoints');
+                }
+
                 const potential = await potentialRes.json();
                 const positions = await positionsRes.json();
-                
+
                 renderDashboard(potential.data, positions.data);
             } catch (error) {
                 console.error('Error fetching data:', error);
-                alert('Gagal mengambil data. Silakan refresh.');
+                showToast('Error', 'Gagal memperbarui data: ' + error.message, false);
             }
         }
-        
+
+        function manualRefresh() {
+            const btn = document.getElementById('refreshBtn');
+            const icon = document.getElementById('refreshIcon');
+            const text = document.getElementById('refreshText');
+            icon.classList.add('animate-spin');
+            text.textContent = 'Memuat...';
+
+            fetchData().finally(() => {
+                setTimeout(() => {
+                    icon.classList.remove('animate-spin');
+                    text.textContent = 'Refresh';
+                }, 500);
+            });
+        }
+
+        function modeBadge(mode) {
+            if (mode === 'REAL') {
+                return '<span class="px-2 py-0.5 bg-rose-500/20 text-rose-300 border border-rose-500/40 rounded text-[10px] font-extrabold tracking-wide">REAL</span>';
+            }
+            return '<span class="px-2 py-0.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 rounded text-[10px] font-semibold tracking-wide">PAPER</span>';
+        }
+
         function renderDashboard(potential, positions) {
-            // Hide loading
             document.getElementById('loading').classList.add('hidden');
             document.getElementById('dashboard').classList.remove('hidden');
-            
-            // Update last update time
+
             const now = new Date();
-            document.getElementById('lastUpdate').textContent = 'Updated: ' + now.toLocaleTimeString('id-ID');
-            
-            // Calculate stats
+            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString('id-ID');
+
             const openPositions = positions.open_positions || [];
+            activePositionsData = openPositions;
             const closedPositions = positions.closed_positions || [];
             const stats = positions.performance_stats || [];
 
+            // Stats cards
             const realStats = stats.find(s => s.mode === 'REAL') || {};
             const paperStats = stats.find(s => s.mode === 'PAPER') || {};
             const totalInvested = openPositions.reduce((sum, p) => sum + (p.invested || 0), 0);
+            const totalGrossPnL = openPositions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
+            const totalNetPnL = openPositions.reduce((sum, p) => sum + (p.net_pnl !== undefined ? p.net_pnl : (p.unrealized_pnl || 0)), 0);
 
-            // Update stats cards
             document.getElementById('totalInvested').textContent = totalInvested.toFixed(2) + ' USDT';
-            document.getElementById('openPositions').textContent =
-                `${openPositions.filter(p => p.mode === 'REAL').length} real / ${openPositions.filter(p => p.mode === 'PAPER').length} paper`;
+            const realCount = openPositions.filter(p => p.mode === 'REAL').length;
+            const paperCount = openPositions.filter(p => p.mode === 'PAPER').length;
+            document.getElementById('openPositionsCount').textContent = `${realCount} Real · ${paperCount} Paper terbuka`;
+            document.getElementById('openBadgeCount').textContent = openPositions.length;
 
-            function setModeCard(pnlId, wrId, st) {
+            const netEl = document.getElementById('totalNetPnL');
+            netEl.textContent = (totalNetPnL >= 0 ? '+' : '') + totalNetPnL.toFixed(4) + ' USDT';
+            netEl.className = 'text-2xl font-extrabold mt-1 mono ' + (totalNetPnL >= 0 ? 'text-emerald-400' : 'text-rose-400');
+            
+            const grossEl = document.getElementById('totalGrossPnL');
+            grossEl.textContent = `Gross: ${totalGrossPnL >= 0 ? '+' : ''}${totalGrossPnL.toFixed(4)} USDT`;
+
+            function setModeStat(pnlId, wrId, st) {
                 const pnl = st.total_pnl || 0;
                 const el = document.getElementById(pnlId);
                 el.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' USDT';
-                el.className = 'text-2xl font-bold ' + (pnl >= 0 ? 'text-green-600' : 'text-red-600');
+                el.className = 'text-2xl font-extrabold mt-1 mono ' + (pnl >= 0 ? 'text-emerald-400' : 'text-rose-400');
                 const total = (st.wins || 0) + (st.losses || 0);
-                document.getElementById(wrId).textContent =
-                    total > 0 ? `WR ${st.win_rate || 0}% · ${total} trade` : 'belum ada trade';
+                document.getElementById(wrId).textContent = total > 0 ? `Win Rate ${st.win_rate || 0}% (${st.wins}W / ${st.losses}L)` : 'Belum ada trade closed';
             }
-            setModeCard('realPnL', 'realWinRate', realStats);
-            setModeCard('paperPnL', 'paperWinRate', paperStats);
+            setModeStat('realPnL', 'realWinRate', realStats);
+            setModeStat('paperPnL', 'paperWinRate', paperStats);
 
-            function modeBadge(mode) {
-                if (mode === 'REAL') return '<span class="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-bold">REAL</span>';
-                return '<span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">PAPER</span>';
-            }
-            
-            // Render potential coins
-            const candidates = potential.coins || [];
-            document.getElementById('candidatesCount').textContent = `${potential.total_candidates} candidates`;
-            
-            const potentialTable = document.getElementById('potentialTable');
-            potentialTable.innerHTML = candidates.map(coin => `
-                <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3 font-semibold">${coin.display || coin.symbol}</td>
-                    <td class="px-4 py-3">
-                        <span class="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-semibold">
-                            ${coin.score.toFixed(0)}
-                        </span>
-                    </td>
-                    <td class="px-4 py-3 text-sm">${coin.price ? coin.price.toFixed(6) : '-'}</td>
-                    <td class="px-4 py-3 text-sm text-green-600">${coin.take_profit_1 ? coin.take_profit_1.toFixed(6) : '-'}</td>
-                    <td class="px-4 py-3 text-sm text-green-600">${coin.take_profit_2 ? coin.take_profit_2.toFixed(6) : '-'}</td>
-                    <td class="px-4 py-3 text-sm text-red-600">${coin.stop_loss ? coin.stop_loss.toFixed(6) : '-'}</td>
-                    <td class="px-4 py-3 text-sm">${coin.risk_reward || '-'}</td>
-                    <td class="px-4 py-3 text-xs text-gray-600 max-w-xs truncate">${(coin.buy_reason || []).join(', ')}</td>
-                </tr>
-            `).join('');
-            
-            // Render open positions
+            // Render Open Positions Table
             const openTable = document.getElementById('openTable');
-            let totalUnrealizedPnL = 0;
-            openTable.innerHTML = openPositions.length > 0 ? openPositions.map(pos => {
-                if (pos.unrealized_pnl) totalUnrealizedPnL += pos.unrealized_pnl;
-                const pnlColor = pos.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600';
-                const pnlBg = pos.unrealized_pnl >= 0 ? 'bg-green-100' : 'bg-red-100';
-                return `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-semibold">${pos.display || pos.symbol}</td>
-                        <td class="px-4 py-3">${modeBadge(pos.mode)}</td>
-                        <td class="px-4 py-3 text-sm">${pos.entry_price.toFixed(6)}</td>
-                        <td class="px-4 py-3 text-sm font-semibold ${pos.current_price >= pos.entry_price ? 'text-green-600' : 'text-red-600'}">
-                            ${pos.current_price ? pos.current_price.toFixed(6) : '-'}
-                        </td>
-                        <td class="px-4 py-3 text-sm font-semibold">${pos.invested.toFixed(2)} USDT</td>
-                        <td class="px-4 py-3">
-                            <div class="flex flex-col">
-                                <span class="px-2 py-1 ${pnlBg} ${pnlColor} rounded text-xs font-semibold">
-                                    ${pos.unrealized_pnl >= 0 ? '+' : ''}${pos.unrealized_pnl.toFixed(2)} USDT
+            if (openPositions.length === 0) {
+                openTable.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-center text-slate-500">Tidak ada posisi terbuka saat ini. Bot standby memindai sinyal baru.</td></tr>';
+            } else {
+                openTable.innerHTML = openPositions.map(pos => {
+                    const grossColor = pos.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                    const curPriceClass = (pos.current_price && pos.entry_price && pos.current_price >= pos.entry_price) ? 'text-emerald-400' : 'text-rose-400';
+                    
+                    // Net Profit calculation badge
+                    const netPnl = pos.net_pnl !== undefined ? pos.net_pnl : (pos.unrealized_pnl || 0);
+                    const netPct = pos.net_pnl_pct !== undefined ? pos.net_pnl_pct : (pos.unrealized_pnl_pct || 0);
+                    const estFee = pos.estimated_exit_fee || 0;
+                    
+                    let netBadge = '';
+                    if (pos.is_profitable_net) {
+                        netBadge = `
+                            <div class="inline-flex flex-col">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>
+                                    Untung Bersih (+${netPnl.toFixed(4)} USDT)
                                 </span>
-                                <span class="text-xs ${pnlColor} mt-1">
-                                    ${pos.unrealized_pnl_pct >= 0 ? '+' : ''}${pos.unrealized_pnl_pct.toFixed(2)}%
+                                <span class="text-[10px] text-emerald-400 font-mono mt-0.5 pl-1">
+                                    Net +${netPct.toFixed(2)}% sesudah fee
                                 </span>
                             </div>
-                        </td>
-                        <td class="px-4 py-3 text-sm text-green-600">${pos.take_profit_1 ? pos.take_profit_1.toFixed(6) : '-'}</td>
-                        <td class="px-4 py-3 text-sm text-green-600">${pos.take_profit_2 ? pos.take_profit_2.toFixed(6) : '-'}</td>
-                        <td class="px-4 py-3 text-sm text-red-600">${pos.stop_loss ? pos.stop_loss.toFixed(6) : '-'}</td>
-                        <td class="px-4 py-3 text-sm">
-                            <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
-                                ${pos.entry_score ? pos.entry_score.toFixed(0) : '-'}
+                        `;
+                    } else if (pos.unrealized_pnl > 0 && !pos.is_profitable_net) {
+                        netBadge = `
+                            <div class="inline-flex flex-col">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-amber-400 mr-1.5"></span>
+                                    Belum Menutup Fee (${netPnl.toFixed(4)} USDT)
+                                </span>
+                                <span class="text-[10px] text-amber-400/80 font-mono mt-0.5 pl-1">
+                                    Harga naik tipis, terpotong fee exit
+                                </span>
+                            </div>
+                        `;
+                    } else {
+                        netBadge = `
+                            <div class="inline-flex flex-col">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-rose-400 mr-1.5"></span>
+                                    Rugi (${netPnl.toFixed(4)} USDT)
+                                </span>
+                                <span class="text-[10px] text-rose-400 font-mono mt-0.5 pl-1">
+                                    Net ${netPct.toFixed(2)}%
+                                </span>
+                            </div>
+                        `;
+                    }
+
+                    return `
+                        <tr class="hover:bg-slate-900/60 transition-colors">
+                            <td class="px-5 py-3.5">
+                                <div class="flex items-center space-x-2">
+                                    <span class="font-bold text-white">${pos.display || pos.symbol}</span>
+                                    ${modeBadge(pos.mode)}
+                                </div>
+                                <div class="text-[10px] text-slate-400 font-mono mt-0.5">${pos.opened_at ? new Date(pos.opened_at).toLocaleTimeString('id-ID') : '-'}</div>
+                            </td>
+                            <td class="px-4 py-3.5 font-mono text-slate-300">${pos.entry_price.toFixed(6)}</td>
+                            <td class="px-4 py-3.5 font-mono font-bold ${curPriceClass}">
+                                ${pos.current_price ? pos.current_price.toFixed(6) : '-'}
+                            </td>
+                            <td class="px-4 py-3.5">
+                                <div class="font-mono text-slate-200">${pos.invested.toFixed(2)} USDT</div>
+                                <div class="text-[11px] font-mono text-slate-400">Qty: ${pos.quantity}</div>
+                            </td>
+                            <td class="px-4 py-3.5">
+                                <div class="font-mono font-semibold ${grossColor}">
+                                    ${pos.unrealized_pnl >= 0 ? '+' : ''}${pos.unrealized_pnl.toFixed(4)} USDT
+                                </div>
+                                <div class="text-[11px] font-mono ${grossColor}">
+                                    ${pos.unrealized_pnl_pct >= 0 ? '+' : ''}${pos.unrealized_pnl_pct.toFixed(2)}%
+                                </div>
+                            </td>
+                            <td class="px-4 py-3.5 font-mono text-amber-400/90 text-xs">
+                                ~${estFee.toFixed(4)} USDT
+                            </td>
+                            <td class="px-5 py-3.5">
+                                ${netBadge}
+                            </td>
+                            <td class="px-4 py-3.5 text-xs font-mono text-emerald-400">
+                                <div>TP1: ${pos.take_profit_1 ? pos.take_profit_1.toFixed(6) : '-'}</div>
+                                <div class="text-slate-400 text-[11px]">TP2: ${pos.take_profit_2 ? pos.take_profit_2.toFixed(6) : '-'}</div>
+                            </td>
+                            <td class="px-4 py-3.5 text-xs font-mono text-rose-400">
+                                ${pos.stop_loss ? pos.stop_loss.toFixed(6) : '-'}
+                            </td>
+                            <td class="px-5 py-3.5 text-center">
+                                <button onclick="openCloseModal('${pos.id}')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-500/20 text-rose-300 hover:bg-rose-600 hover:text-white border border-rose-500/40 transition active:scale-95 shadow-md shadow-rose-950/50">
+                                    🔴 Manual Close
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            // Render Screener Candidates Table
+            const candidates = potential.coins || [];
+            document.getElementById('candidatesCount').textContent = `${candidates.length} coin ditemukan`;
+            const potentialTable = document.getElementById('potentialTable');
+            if (candidates.length === 0) {
+                potentialTable.innerHTML = '<tr><td colspan="8" class="px-6 py-6 text-center text-slate-500">Tidak ada koin dengan score &ge; 55 pada pemindaian terakhir.</td></tr>';
+            } else {
+                potentialTable.innerHTML = candidates.map(coin => `
+                    <tr class="hover:bg-slate-900/60 transition-colors">
+                        <td class="px-5 py-3.5 font-bold text-white">${coin.display || coin.symbol}</td>
+                        <td class="px-4 py-3.5">
+                            <span class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                ${coin.score.toFixed(0)}
                             </span>
                         </td>
+                        <td class="px-4 py-3.5 font-mono text-slate-300">${coin.price ? coin.price.toFixed(6) : '-'}</td>
+                        <td class="px-4 py-3.5 font-mono text-emerald-400">${coin.take_profit_1 ? coin.take_profit_1.toFixed(6) : '-'}</td>
+                        <td class="px-4 py-3.5 font-mono text-emerald-400">${coin.take_profit_2 ? coin.take_profit_2.toFixed(6) : '-'}</td>
+                        <td class="px-4 py-3.5 font-mono text-rose-400">${coin.stop_loss ? coin.stop_loss.toFixed(6) : '-'}</td>
+                        <td class="px-4 py-3.5 font-mono text-slate-300">${coin.risk_reward || '-'}</td>
+                        <td class="px-5 py-3.5 text-xs text-slate-400 max-w-xs truncate">${(coin.buy_reason || []).join(', ')}</td>
                     </tr>
-                `;
-            }).join('') : '<tr><td colspan="10" class="px-4 py-6 text-center text-gray-500">Tidak ada posisi terbuka</td></tr>';
-            
-            // Update total unrealized PnL
-            const totalPnLElement = document.getElementById('totalUnrealizedPnL');
-            totalPnLElement.textContent = `Total (REAL+PAPER): ${totalUnrealizedPnL >= 0 ? '+' : ''}${totalUnrealizedPnL.toFixed(2)} USDT`;
-            totalPnLElement.className = 'text-sm font-semibold ' + (totalUnrealizedPnL >= 0 ? 'text-green-600' : 'text-red-600');
-            
-            // Render closed positions
+                `).join('');
+            }
+
+            // Render Closed Positions Table
             const closedTable = document.getElementById('closedTable');
-            closedTable.innerHTML = closedPositions.length > 0 ? closedPositions.map(trade => {
-                const pnlColor = trade.pnl >= 0 ? 'text-green-600' : 'text-red-600';
-                const pnlBg = trade.pnl >= 0 ? 'bg-green-100' : 'bg-red-100';
-                return `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-semibold">${trade.display || trade.symbol}</td>
-                        <td class="px-4 py-3">${modeBadge(trade.mode)}</td>
-                        <td class="px-4 py-3 text-sm">${trade.entry_price.toFixed(6)}</td>
-                        <td class="px-4 py-3 text-sm">${trade.exit_price ? trade.exit_price.toFixed(6) : '-'}</td>
-                        <td class="px-4 py-3 ${pnlColor} font-semibold">${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(4)} USDT</td>
-                        <td class="px-4 py-3">
-                            <span class="px-2 py-1 ${pnlBg} ${pnlColor} rounded text-xs font-semibold">
-                                ${trade.pnl_pct ? (trade.pnl_pct >= 0 ? '+' : '') + trade.pnl_pct.toFixed(2) + '%' : '-'}
-                            </span>
-                        </td>
-                        <td class="px-4 py-3 text-xs text-gray-600">${trade.exit_reason || '-'}</td>
-                        <td class="px-4 py-3 text-xs text-gray-600">${trade.exit_date || '-'}</td>
-                    </tr>
-                `;
-            }).join('') : '<tr><td colspan="8" class="px-4 py-6 text-center text-gray-500">Belum ada transaksi</td></tr>';
+            if (closedPositions.length === 0) {
+                closedTable.innerHTML = '<tr><td colspan="8" class="px-6 py-6 text-center text-slate-500">Belum ada riwayat transaksi yang ditutup.</td></tr>';
+            } else {
+                closedTable.innerHTML = closedPositions.map(trade => {
+                    const pnlColor = trade.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                    const pnlBadge = trade.pnl >= 0 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border-rose-500/30';
+                    return `
+                        <tr class="hover:bg-slate-900/60 transition-colors">
+                            <td class="px-5 py-3.5 font-semibold text-white">${trade.display || trade.symbol}</td>
+                            <td class="px-4 py-3.5">${modeBadge(trade.mode)}</td>
+                            <td class="px-4 py-3.5 font-mono text-slate-300">${trade.entry_price ? trade.entry_price.toFixed(6) : '-'}</td>
+                            <td class="px-4 py-3.5 font-mono text-slate-300">${trade.exit_price ? trade.exit_price.toFixed(6) : '-'}</td>
+                            <td class="px-4 py-3.5 font-mono font-bold ${pnlColor}">
+                                ${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(4)} USDT
+                            </td>
+                            <td class="px-4 py-3.5 font-mono">
+                                <span class="px-2 py-0.5 rounded text-xs font-semibold border ${pnlBadge}">
+                                    ${trade.pnl_pct ? (trade.pnl_pct >= 0 ? '+' : '') + trade.pnl_pct.toFixed(2) + '%' : '-'}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3.5 text-xs font-medium text-slate-300">
+                                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">${trade.exit_reason || '-'}</span>
+                            </td>
+                            <td class="px-5 py-3.5 text-xs text-slate-400 font-mono">${trade.exit_date || '-'}</td>
+                        </tr>
+                    `;
+                }).join('');
+            }
         }
-        
-        function refreshData() {
-            fetchData();
+
+        function openCloseModal(posId) {
+            const pos = activePositionsData.find(p => p.id === posId);
+            if (!pos) {
+                alert('Data posisi tidak ditemukan.');
+                return;
+            }
+
+            pendingClosePositionId = posId;
+            document.getElementById('modalSymbol').textContent = pos.display || pos.symbol;
+            document.getElementById('modalMode').innerHTML = modeBadge(pos.mode);
+            document.getElementById('modalEntryPrice').textContent = pos.entry_price.toFixed(6) + ' USDT';
+            document.getElementById('modalCurrentPrice').textContent = (pos.current_price ? pos.current_price.toFixed(6) : '-') + ' USDT';
+            
+            const fee = pos.estimated_exit_fee || 0;
+            document.getElementById('modalFee').textContent = '~' + fee.toFixed(4) + ' USDT';
+
+            const netPnl = pos.net_pnl !== undefined ? pos.net_pnl : (pos.unrealized_pnl || 0);
+            const netPct = pos.net_pnl_pct !== undefined ? pos.net_pnl_pct : (pos.unrealized_pnl_pct || 0);
+            const netEl = document.getElementById('modalNetPnL');
+            const verdictEl = document.getElementById('modalNetVerdict');
+
+            netEl.textContent = `${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT (${netPct >= 0 ? '+' : ''}${netPct.toFixed(2)}%)`;
+            
+            if (pos.is_profitable_net) {
+                netEl.className = 'text-sm font-extrabold mono text-emerald-400';
+                verdictEl.className = 'p-2.5 rounded-lg text-center font-bold text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+                verdictEl.innerHTML = '🟢 <strong>BENAR-BENAR UNTUNG BERSIH</strong> sesudah fee!<br><span class="font-normal text-[11px] text-emerald-300/80">Jika ditutup sekarang, saldo USDT Anda akan bertambah bersih.</span>';
+            } else if (pos.unrealized_pnl > 0 && !pos.is_profitable_net) {
+                netEl.className = 'text-sm font-extrabold mono text-amber-400';
+                verdictEl.className = 'p-2.5 rounded-lg text-center font-bold text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30';
+                verdictEl.innerHTML = '⚠️ <strong>BELUM MENUTUP FEE EXCHANGE!</strong><br><span class="font-normal text-[11px] text-amber-300/80">Harga saat ini memang di atas entry, namun keuntungan belum cukup menutupi potongan fee taker exit 0.1%.</span>';
+            } else {
+                netEl.className = 'text-sm font-extrabold mono text-rose-400';
+                verdictEl.className = 'p-2.5 rounded-lg text-center font-bold text-xs bg-rose-500/20 text-rose-300 border border-rose-500/30';
+                verdictEl.innerHTML = '🔴 <strong>POSISI SEDANG RUGI (MINUS)</strong><br><span class="font-normal text-[11px] text-rose-300/80">Jika ditutup sekarang, posisi akan direalisasikan sebagai kerugian (cut loss).</span>';
+            }
+
+            document.getElementById('confirmCloseBtnText').textContent = `Tutup Posisi ${pos.mode}`;
+            document.getElementById('closeModal').classList.remove('hidden');
         }
-        
-        // Initial load
-        fetchData();
-        
-        // Auto-refresh every 30 seconds with visual feedback
-        let refreshInterval = setInterval(() => {
-            console.log('Auto-refreshing...');
-            fetchData().then(() => {
-                // Show refresh indicator
-                const btn = document.querySelector('button[onclick="refreshData()"]');
-                if (btn) {
-                    btn.innerHTML = '✓ Updated';
-                    setTimeout(() => {
-                        btn.innerHTML = '🔄 Refresh';
-                    }, 2000);
+
+        function closeModalWindow() {
+            pendingClosePositionId = null;
+            document.getElementById('closeModal').classList.add('hidden');
+        }
+
+        async function executeManualClose() {
+            if (!pendingClosePositionId) return;
+
+            const btn = document.getElementById('confirmCloseBtn');
+            const btnText = document.getElementById('confirmCloseBtnText');
+            btn.disabled = true;
+            btnText.textContent = 'Mengeksekusi Sell...';
+
+            try {
+                const response = await fetch(`${API_BASE}/positions/${pendingClosePositionId}/close`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.detail || 'Gagal mengeksekusi close');
                 }
-            }).catch(err => {
-                console.error('Auto-refresh error:', err);
-            });
+
+                closeModalWindow();
+                showToast('Sukses Close', result.message || 'Posisi berhasil ditutup.', true);
+                // Refresh table immediately
+                await fetchData();
+            } catch (err) {
+                console.error('Manual close error:', err);
+                alert('Gagal menutup posisi: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = 'Tutup Posisi Sekarang';
+            }
+        }
+
+        // Initial Load
+        fetchData();
+
+        // Auto Refresh every 30 seconds
+        setInterval(() => {
+            fetchData();
         }, 30000);
     </script>
 </body>

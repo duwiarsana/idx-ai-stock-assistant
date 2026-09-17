@@ -33,6 +33,7 @@ EXIT_TP1 = "TP1"
 EXIT_TP2 = "TP2"
 EXIT_SL = "SL"
 EXIT_ROI = "ROI"
+EXIT_MANUAL = "MANUAL"
 
 # Trade sides
 SIDE_BUY = "BUY"
@@ -40,6 +41,7 @@ SIDE_SELL_TP1 = "SELL_TP1"
 SIDE_SELL_TP2 = "SELL_TP2"
 SIDE_SELL_SL = "SELL_SL"
 SIDE_SELL_ROI = "SELL_ROI"
+SIDE_SELL_MANUAL = "SELL_MANUAL"
 
 
 class PaperTrader:
@@ -240,7 +242,8 @@ class PaperTrader:
             position_id=pos.id,
             symbol=pos.symbol,
             side={EXIT_TP1: SIDE_SELL_TP1, EXIT_TP2: SIDE_SELL_TP2,
-                  EXIT_SL: SIDE_SELL_SL, EXIT_ROI: SIDE_SELL_ROI}[action],
+                  EXIT_SL: SIDE_SELL_SL, EXIT_ROI: SIDE_SELL_ROI,
+                  EXIT_MANUAL: SIDE_SELL_MANUAL}.get(action, SIDE_SELL_MANUAL),
             price=exit_price,
             quantity=sell_qty,
             quote_amount=proceeds,
