@@ -273,15 +273,17 @@ class Settings(BaseSettings):
 
     # Dynamic ROI exit (Freqtrade "minimal_roi"): time-based early exit so stale
     # thin-profit positions release capital instead of waiting for a full TP.
-    # Default ON to prevent positions from getting stuck indefinitely.
+    # The tiers were relaxed (higher thresholds / later) so a position isn't
+    # force-sold at +0.5% before it can reach TP1 (>=3.5%). It still frees
+    # capital from truly stale positions without hurting the TP goal.
     crypto_real_dynamic_roi_enabled: bool = True
     # Tiers as "open_minutes:min_profit_pct,..." e.g. "60:1.2,120:0.8,240:0.5". Exit
     # when position age ≥ minutes AND floating profit ≥ percent (time-ANDed per
     # tier; the first tier whose age is reached applies). Empty string → fall
     # back to the single (min, percent) pair below.
-    crypto_real_dynamic_roi_tiers: str = "60:1.2,120:0.8,240:0.5"
+    crypto_real_dynamic_roi_tiers: str = "120:1.5,240:1.0,480:0.75"
     crypto_real_dynamic_roi_min: int = 120
-    crypto_real_dynamic_roi_percent: float = 0.8
+    crypto_real_dynamic_roi_percent: float = 1.5
     # Require a short-term (15m) recovery confirmation before entry: reject
     # candidates whose 15m is still bearish. This stops the engine from buying
     # a pullback that is still heading down (falling knife) — we only enter

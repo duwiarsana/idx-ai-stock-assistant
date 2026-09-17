@@ -65,6 +65,9 @@ class TokoCryptoTradeClient:
         self.api_secret = api_secret or settings.crypto_real_api_secret
         self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
+        # (cache_ts, rules) per symbol — see get_symbol_rules().
+        self._rules_cache_ttl = 60.0
+        self._rules_cache: dict[str, tuple[float, dict]] = {}
 
     def _assert_configured(self) -> None:
         if not self.api_key or not self.api_secret:
@@ -163,9 +166,18 @@ class TokoCryptoTradeClient:
         """Return trading rules for a symbol: lot step, min notional, decimals.
 
         Uses the public endpoint (no auth). Falls back to sane defaults so a
-        failure never blocks order placement entirely.
+        failure never blocks order placement entirely. Successful results are
+        cached for ``_rules_cache_ttl`` seconds — a single position lifecycle
+        otherwise calls this up to 3× (open, pegged-guard, close), which adds
+        unnecessary load and 429 risk on Tokocrypto's aggressive rate limits.
         """
         symbol = symbol.replace("_", "_")
+        import time as _time
+        now = _time.monotonic()
+        cached = self._rules_cache.get(symbol)
+        if cached is not None and (now - cached[0]) < self._rules_cache_ttl:
+            return cached[1]
+
         client = await self._get_client()
         try:
             resp = await client.get(
@@ -181,7 +193,7 @@ class TokoCryptoTradeClient:
             lot = next((f for f in filters if f.get("filterType") == "LOT_SIZE"), {})
             noti = next((f for f in filters if f.get("filterType") == "NOTIONAL"), {})
             prc = next((f for f in filters if f.get("filterType") == "PRICE_FILTER"), {})
-            return {
+            rules = {
                 "step_size": float(lot.get("stepSize") or 0),
                 "min_qty": float(lot.get("minQty") or 0),
                 "min_notional": float(noti.get("minNotional") or 0),
@@ -189,6 +201,8 @@ class TokoCryptoTradeClient:
                 # exchange rejects them with "Request Parameter Error".
                 "tick_size": float(prc.get("tickSize") or 0),
             }
+            self._rules_cache[symbol] = (now, rules)
+            return rules
         except Exception:
             return self._default_rules(symbol)
 

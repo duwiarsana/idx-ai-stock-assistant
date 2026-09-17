@@ -170,9 +170,12 @@ def test_no_withdraw_endpoint():
 
 
 def test_real_trading_disabled_by_default():
-    from app.config import get_settings
-    assert get_settings().crypto_real_trading_enabled is False
-    assert get_settings().crypto_real_allocation_percent <= 2.0
+    # The CODE-LEVEL default must stay OFF (safety invariant). We assert the
+    # class default rather than the live env-loaded setting because an operator
+    # may explicitly opt in to real trading via CRYPTO_REAL_TRADING_ENABLED.
+    from app.config import Settings
+    assert Settings.model_fields["crypto_real_trading_enabled"].default is False
+    assert Settings.model_fields["crypto_real_allocation_percent"].default <= 2.0
 
 
 # ── RealTrader engine tests (all mocked) ──────────────────────────────

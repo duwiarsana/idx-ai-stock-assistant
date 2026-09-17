@@ -146,7 +146,11 @@ def passes_entry_gate(c: dict, btc_bearish: bool = False) -> bool:
     if settings.crypto_real_entry_require_uptrend:
         price = s1h.get("price")
         ema20 = s1h.get("ema20")
-        if ema20 and price:
+        # Pullback-only guard (skipped in breakout mode): reject over-extended
+        # prices above EMA20 and prices already at the recent high. When
+        # require_breakout is True we WANT to buy at/just past the high, so
+        # these two rejection rules would contradict the breakout intent.
+        if ema20 and price and not settings.crypto_real_entry_require_breakout:
             max_above = ema20 * (1 + settings.crypto_real_entry_pullback_max_pct / 100.0)
             if price > max_above:
                 return False
