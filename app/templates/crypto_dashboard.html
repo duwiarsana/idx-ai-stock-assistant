@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IDX AI | Crypto Trading Terminal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -687,9 +687,10 @@
 
     function reasonBadge(r) {
         if (!r) return '<span class="reason-chip">—</span>';
-        const colors = { TP1: '#10d987', TP2: '#10d987', SL: '#f0374a', ROI: '#a78bfa', MANUAL: '#f59e0b' };
-        const c = colors[r.replace(/_DUST$','').split('_')[0]] || '#94a3b8';
-        return `<span class="reason-chip" style="color:${c};border-color:${c}33">${r}</span>`;
+        var colors = { TP1: '#10d987', TP2: '#10d987', SL: '#f0374a', ROI: '#a78bfa', MANUAL: '#f59e0b' };
+        var key = r.replace('_DUST', '').split('_')[0];
+        var c = colors[key] || '#94a3b8';
+        return '<span class="reason-chip" style="color:' + c + ';border-color:' + c + '33">' + r + '</span>';
     }
 
     async function loadData() {
