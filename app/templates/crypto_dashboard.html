@@ -429,7 +429,7 @@
             <div class="logo-mark">⚡</div>
             <div>
                 <div class="logo-text">IDX AI Trading Terminal</div>
-                <div class="logo-sub">Tokocrypto Spot · Real + Paper Mode</div>
+                <div class="logo-sub">Tokocrypto Spot · Real Mode Only</div>
             </div>
             <span class="version-badge">LIVE</span>
         </div>
@@ -478,10 +478,10 @@
                 <div class="metric-value mono" id="mRealPnL">—</div>
                 <div class="metric-sub" id="mRealWR">—</div>
             </div>
-            <div class="metric-card" style="border-color:rgba(34,211,238,0.15)">
-                <div class="metric-label"><span class="badge-paper" style="font-size:9px">PAPER</span> &nbsp;Realized PnL (Closed)</div>
-                <div class="metric-value mono" id="mPaperPnL">—</div>
-                <div class="metric-sub" id="mPaperWR">—</div>
+            <div class="metric-card" style="border-color:rgba(16,217,135,0.15)">
+                <div class="metric-label"><span class="badge-real" style="font-size:9px">REAL</span> &nbsp;Saldo Tersedia</div>
+                <div class="metric-value mono" id="mRealBalance">—</div>
+                <div class="metric-sub" id="mRealBalanceSub">USDT balance on Tokocrypto</div>
             </div>
         </div>
 
@@ -790,9 +790,11 @@
         };
     }
 
-    function renderMetrics(positions) {
+    function renderMetrics(data) {
+        const positions = data.positions;
         const opens = positions.open_positions || [];
         const stats = positions.performance_stats || [];
+        const real_usdt_balance = positions.real_usdt_balance || 0;
 
         _positions = opens;
 
@@ -801,7 +803,7 @@
         const net = opens.reduce((s, p) => s + (p.net_pnl ?? p.unrealized_pnl ?? 0), 0);
 
         $('mInvested').textContent = fmtNum(invested, 2) + ' USDT';
-        $('mOpenCount').textContent = `${opens.filter(p=>p.mode==='REAL').length} Real · ${opens.filter(p=>p.mode==='PAPER').length} Paper terbuka`;
+        $('mOpenCount').textContent = `${opens.length} Posisi real terbuka`;
 
         const gEl = $('mGrossPnL');
         gEl.textContent = fmtPnL(gross, 4) + ' USDT';
@@ -825,7 +827,11 @@
                 : 'Belum ada closed trade';
         }
         setMode('mRealPnL', 'mRealWR', real);
-        setMode('mPaperPnL', 'mPaperWR', paper);
+
+        if (positions.real_usdt_balance !== undefined) {
+            $('mRealBalance').textContent = fmtNum(positions.real_usdt_balance, 2) + ' USDT';
+            $('mRealBalance').style.color = '#fff';
+        }
         $('openCountBadge').textContent = opens.length;
     }
 
@@ -961,7 +967,7 @@
     }
 
     function render(data) {
-        renderMetrics(data.positions);
+        renderMetrics(data);
         renderOpenTable(data.positions);
         renderPotentialTable(data.potential);
         renderClosedTable(data.positions);

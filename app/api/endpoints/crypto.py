@@ -142,18 +142,24 @@ async def crypto_positions_summary():
         return 0
     
     async with async_session_factory() as session:
-        # Open positions
+        # Open positions (REAL mode only)
         result = await session.execute(
             select(CryptoPaperPosition)
-            .where(CryptoPaperPosition.status == "OPEN")
+            .where(
+                CryptoPaperPosition.status == "OPEN",
+                CryptoPaperPosition.mode == "REAL"
+            )
             .order_by(desc(CryptoPaperPosition.created_at))
         )
         open_positions = result.scalars().all()
         
-        # Recent closed positions (last 20)
+        # Recent closed positions (last 20, REAL mode only)
         result = await session.execute(
             select(CryptoPaperPosition)
-            .where(CryptoPaperPosition.status == "CLOSED")
+            .where(
+                CryptoPaperPosition.status == "CLOSED",
+                CryptoPaperPosition.mode == "REAL"
+            )
             .order_by(desc(CryptoPaperPosition.closed_at))
             .limit(20)
         )
@@ -171,7 +177,10 @@ async def crypto_positions_summary():
                 func.coalesce(func.sum(CryptoPaperPosition.realized_pnl), 0.0).label("total_pnl"),
                 func.avg(CryptoPaperPosition.realized_pnl).label("avg_pnl"),
             )
-            .where(CryptoPaperPosition.status == "CLOSED")
+            .where(
+                CryptoPaperPosition.status == "CLOSED",
+                CryptoPaperPosition.mode == "REAL"
+            )
             .group_by(CryptoPaperPosition.mode)
         )
         # NOTE: use stats_result (fresh execute) — re-reading `result` after
@@ -258,15 +267,28 @@ async def crypto_positions_summary():
             }
             for s in stats_rows
         ]
-    
-    return {
-        "status": "success",
-        "data": {
-            "open_positions": open_data,
-            "closed_positions": closed_data,
-            "performance_stats": stats_data,
-        },
-    }
+        
+        # Fetch actual USDT balance from Tokocrypto
+        from app.data.tokocrypto_client import tokocrypto_client
+        usdt_balance = 0.0
+        try:
+            acc = await tokocrypto_client.fetch_account_info()
+            for bal in acc.get("balances", []):
+                if bal.get("asset") == "USDT":
+                    usdt_balance = float(bal.get("free", 0))
+                    break
+        except Exception as e:
+            logger.warning(f"Failed to fetch USDT balance: {e}")
+            
+        return {
+            "status": "success",
+            "data": {
+                "open_positions": open_data,
+                "closed_positions": closed_data,
+                "stats": stats_data,
+                "real_usdt_balance": round(usdt_balance, 2)
+            }
+        }
 
 
 @router.get("/scanner/config")
