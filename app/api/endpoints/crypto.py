@@ -4,7 +4,9 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.config import get_settings
 from app.services.crypto_scanner import crypto_scanner
@@ -14,6 +16,30 @@ from app.services.cache_service import cache_service
 logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+
+security = HTTPBasic()
+
+
+def verify_dashboard_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+    """Verify HTTP Basic credentials for dashboard and management endpoints."""
+    current_settings = get_settings()
+    if not current_settings.dashboard_auth_enabled:
+        return "anonymous"
+
+    correct_username = secrets.compare_digest(
+        credentials.username.encode("utf8"), current_settings.dashboard_username.encode("utf8")
+    )
+    correct_password = secrets.compare_digest(
+        credentials.password.encode("utf8"), current_settings.dashboard_password.encode("utf8")
+    )
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": 'Basic realm="IDX AI Dashboard"'},
+        )
+    return credentials.username
+
 
 # Global price cache for dashboard API
 _PRICE_CACHE: dict[str, tuple[float, float]] = {}
@@ -53,7 +79,11 @@ async def crypto_scanner_latest(limit: int = 10):
 
 
 @router.get("/dashboard/potential")
-async def crypto_potential_coins(limit: int = 10, min_score: int = 55):
+async def crypto_potential_coins(
+    limit: int = 10,
+    min_score: int = 55,
+    user: str = Depends(verify_dashboard_auth),
+):
     """Get potential coins to buy - ranked by momentum score."""
     from sqlalchemy import select, desc
     from app.db.session import async_session_factory
@@ -151,7 +181,7 @@ async def crypto_potential_coins(limit: int = 10, min_score: int = 55):
 
 
 @router.get("/dashboard/positions")
-async def crypto_positions_summary():
+async def crypto_positions_summary(user: str = Depends(verify_dashboard_auth)):
     """Get current open positions and performance summary."""
     from sqlalchemy import select, func, desc
     from app.db.session import async_session_factory
@@ -558,7 +588,10 @@ async def crypto_paper_history(limit: int = 20):
 
 
 @router.post("/positions/{position_id}/close")
-async def crypto_manual_close_position(position_id: str):
+async def crypto_manual_close_position(
+    position_id: str,
+    user: str = Depends(verify_dashboard_auth),
+):
     """Manually close an open crypto position (REAL or PAPER) at current market price."""
     import uuid
     from fastapi import HTTPException
@@ -650,7 +683,12 @@ async def crypto_manual_close_position(position_id: str):
 
 
 @router.get("/klines/{symbol}")
-async def get_klines(symbol: str, interval: str = "15m", limit: int = 200):
+async def get_klines(
+    symbol: str,
+    interval: str = "15m",
+    limit: int = 200,
+    user: str = Depends(verify_dashboard_auth),
+):
     """Return OHLCV candlestick data for a symbol.
 
     Used by the dashboard chart modal. Cached for 30 s per (symbol, interval).
@@ -687,7 +725,7 @@ async def get_klines(symbol: str, interval: str = "15m", limit: int = 200):
 
 
 @router.get("/dashboard")
-async def crypto_dashboard_html():
+async def crypto_dashboard_html(user: str = Depends(verify_dashboard_auth)):
     """Serve the crypto trading dashboard HTML page."""
     from fastapi.responses import HTMLResponse
     from pathlib import Path

@@ -335,6 +335,11 @@ class Settings(BaseSettings):
     # Reconnect / publish timeout.
     mqtt_timeout: float = 5.0
 
+    # ── Dashboard Authentication ──────────────────────
+    dashboard_auth_enabled: bool = True
+    dashboard_username: str = "duwiarsana"
+    dashboard_password: str = "bait695mash215"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
