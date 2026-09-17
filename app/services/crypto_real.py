@@ -504,23 +504,17 @@ class RealTrader:
                 return True
 
         # ── REAL SELL order ───────────────────────────────────────────
-        # For TP exits: use limit order at TP level to avoid slippage.
-        # For SL/dust exits: use market order (speed matters more than price).
+        # For TP exits: attempt limit order first (slippage protection).
+        # If rejected or not filled, fallback to market order.
+        # For SL/ROI exits: use market order immediately.
         try:
             if action in (EXIT_TP1, EXIT_TP2):
-                # Limit sell at the TP level (slightly below to ensure fill)
                 tp_level = pos.take_profit_2 if action == EXIT_TP2 else pos.take_profit_1
-                limit_price = tp_level * 0.998 if tp_level else price  # 0.2% below TP
-                # Ensure limit price >= current price (can't sell below market)
+                limit_price = tp_level * 0.998 if tp_level else price
                 limit_price = max(limit_price, price)
-                # Round to PRICE_FILTER tick size
                 rules = await self.client.get_symbol_rules(pos.symbol)
                 tick = rules.get("tick_size") or 1e-8
                 limit_price = self._round_down_to_step(limit_price, tick)
-                logger.info(
-                    f"📊 {pos.symbol}: Limit SELL at {limit_price:.6f} "
-                    f"(TP level={tp_level:.6f}, current={price:.6f})"
-                )
                 resp = await self.client.limit_sell(pos.symbol, qty_sell, limit_price)
             else:
                 resp = await self.client.market_sell(pos.symbol, qty_sell)

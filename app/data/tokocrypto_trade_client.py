@@ -282,11 +282,10 @@ class TokoCryptoTradeClient:
         """Cancel an open order."""
         return await self._request(
             "POST",
-            "/open/v1/orders",
+            "/open/v1/orders/cancel",
             self._signed_params(
                 symbol=symbol.replace("_", "_"),
                 orderId=order_id,
-                type="CANCEL",
             ),
         )
 
