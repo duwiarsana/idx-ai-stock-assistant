@@ -1273,7 +1273,7 @@ class RealTrader:
         if quote == "USDT":
             try:
                 resp = await client.get(
-                    "https://api.binance.com/api/v3/ticker/price",
+                    "https://data-api.binance.vision/api/v3/ticker/price",
                     params={"symbol": f"{asset}{quote}"},
                 )
                 price = float(resp.json().get("price", 0))

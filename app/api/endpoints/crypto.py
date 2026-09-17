@@ -134,10 +134,20 @@ async def crypto_positions_summary():
                             continue
                         logger.warning(f"Failed to fetch bulk prices: {exc}")
                         break
+        # Fallback to Binance Vision ticker if Tokocrypto fails or is rate-limited (429)
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get("https://data-api.binance.vision/api/v3/ticker/price")
+                if response.status_code == 200:
+                    data = response.json()
+                    prices = {item["symbol"]: float(item["price"]) for item in data}
+                    _PRICE_CACHE["ALL"] = (prices, now)
+                    base = symbol.replace("_USDT", "").upper() + "USDT"
+                    return prices.get(base, 0.0)
         except Exception as e:
-            logger.warning(f"Error in get_current_price client: {e}")
+            logger.warning(f"Error in Binance Vision fallback price client: {e}")
             
-        return 0.0  
+        return 0.0
     
     async with async_session_factory() as session:
         # Open positions (REAL mode only)
