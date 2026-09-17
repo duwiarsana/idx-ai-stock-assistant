@@ -603,17 +603,17 @@ async def get_klines(symbol: str, interval: str = "15m", limit: int = 200):
                 sym_obj = s
                 break
         if sym_obj is None:
-            return {"status": "error", "message": f"Symbol {symbol} not found on Tokocrypto"}, 404
+            return {"status": "error", "message": f"Symbol {symbol} not found on Tokocrypto"}
 
         candles = await tokocrypto_client.fetch_klines(sym_obj, interval=interval, limit=limit)
         payload = {"symbol": symbol, "interval": interval, "candles": candles}
         await cache_service._set(cache_key, payload, ttl=30)
         return {"status": "success", "data": payload}
     except ValueError as exc:
-        return {"status": "error", "message": str(exc)}, 400
+        return {"status": "error", "message": str(exc)}
     except Exception as exc:
         logger.warning(f"klines error for {symbol}: {exc}")
-        return {"status": "error", "message": f"Failed to fetch klines: {exc}"}, 502
+        return {"status": "error", "message": f"Failed to fetch klines: {exc}"}
 
 
 @router.get("/dashboard")

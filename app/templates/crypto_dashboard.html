@@ -1059,9 +1059,6 @@
             if (!res.ok) throw new Error(data.detail || 'Eksekusi gagal');
             closeModal();
             showToast('Close Berhasil', data.message || 'Posisi berhasil ditutup.', true);
-            // Show cooldown notice
-            $('cooldownNotice').classList.remove('hidden');
-            setTimeout(() => $('cooldownNotice').classList.add('hidden'), 60000);
             await fetchAndRender();
         } catch (e) {
             showToast('Close Gagal', e.message, false);
