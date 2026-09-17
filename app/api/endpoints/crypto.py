@@ -104,42 +104,40 @@ async def crypto_positions_summary():
         now = time.time()
         
         # Check cache first
-        if symbol in _PRICE_CACHE:
-            cached_price, cached_time = _PRICE_CACHE[symbol]
+        if "ALL" in _PRICE_CACHE:
+            cached_prices, cached_time = _PRICE_CACHE["ALL"]
             if now - cached_time < _PRICE_CACHE_TTL:
-                return cached_price
+                base = symbol.replace("_USDT", "").upper() + "USDT"
+                return cached_prices.get(base, 0.0)
         
         try:
-            base = symbol.replace("_USDT", "").lower()
             async with httpx.AsyncClient(timeout=10.0) as client:
-                # Retry with backoff for rate limiting
                 for attempt in range(3):
                     try:
-                        response = await client.get(
-                            f"https://www.tokocrypto.site/api/v3/ticker/24hr?symbol={base.upper()}USDT"
-                        )
+                        response = await client.get("https://www.tokocrypto.site/api/v3/ticker/price")
                         if response.status_code == 200:
                             data = response.json()
-                            price = float(data.get("lastPrice", 0))
-                            if price > 0:
-                                _PRICE_CACHE[symbol] = (price, now)
-                                return price
+                            # data is a list: [{"symbol": "BTCUSDT", "price": "60000.00"}, ...]
+                            prices = {item["symbol"]: float(item["price"]) for item in data}
+                            _PRICE_CACHE["ALL"] = (prices, now)
+                            base = symbol.replace("_USDT", "").upper() + "USDT"
+                            return prices.get(base, 0.0)
                         elif response.status_code == 429:
                             if attempt < 2:
-                                await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s
+                                await asyncio.sleep(2 ** attempt)
                                 continue
-                    except httpx.TimeoutException:
+                            else:
+                                break
+                    except Exception as exc:
                         if attempt < 2:
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(2 ** attempt)
                             continue
+                        logger.warning(f"Failed to fetch bulk prices: {exc}")
+                        break
         except Exception as e:
-            logger.warning(f"Failed to fetch price for {symbol}: {e}")
-        
-        # Fallback: return last cached price even if expired
-        if symbol in _PRICE_CACHE:
-            return _PRICE_CACHE[symbol][0]
-        
-        return 0
+            logger.warning(f"Error in get_current_price client: {e}")
+            
+        return 0.0  
     
     async with async_session_factory() as session:
         # Open positions (REAL mode only)
