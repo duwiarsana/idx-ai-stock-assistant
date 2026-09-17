@@ -563,8 +563,9 @@ async def get_klines(symbol: str, interval: str = "15m", limit: int = 200):
     """Return OHLCV candlestick data for a symbol.
 
     Used by the dashboard chart modal. Cached for 30 s per (symbol, interval).
+    Symbol should be in raw Tokocrypto format with underscore, e.g. SPYB_USDT.
     """
-    from app.data.tokocrypto_client import tokocrypto_client, TokocryptoSymbol
+    from app.data.tokocrypto_client import tokocrypto_client
 
     cache_key = f"klines:{symbol}:{interval}:{limit}"
     cached = await cache_service._get(cache_key)
@@ -572,8 +573,18 @@ async def get_klines(symbol: str, interval: str = "15m", limit: int = 200):
         return {"status": "success", "data": cached}
 
     try:
-        sym = TokocryptoSymbol(symbol)
-        candles = await tokocrypto_client.fetch_klines(sym, interval=interval, limit=limit)
+        # Normalize: accept both SPYB_USDT and SPYBUSDT (no underscore)
+        raw_sym = symbol if "_" in symbol else None
+        symbols = await tokocrypto_client.fetch_symbols()
+        sym_obj = None
+        for s in symbols:
+            if s.raw_symbol == raw_sym or s.normalized_symbol == symbol.upper().replace("_", ""):
+                sym_obj = s
+                break
+        if sym_obj is None:
+            return {"status": "error", "message": f"Symbol {symbol} not found on Tokocrypto"}, 404
+
+        candles = await tokocrypto_client.fetch_klines(sym_obj, interval=interval, limit=limit)
         payload = {"symbol": symbol, "interval": interval, "candles": candles}
         await cache_service._set(cache_key, payload, ttl=30)
         return {"status": "success", "data": payload}
@@ -581,7 +592,7 @@ async def get_klines(symbol: str, interval: str = "15m", limit: int = 200):
         return {"status": "error", "message": str(exc)}, 400
     except Exception as exc:
         logger.warning(f"klines error for {symbol}: {exc}")
-        return {"status": "error", "message": "Failed to fetch klines"}, 502
+        return {"status": "error", "message": f"Failed to fetch klines: {exc}"}, 502
 
 
 @router.get("/dashboard")
