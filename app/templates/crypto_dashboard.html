@@ -1227,13 +1227,6 @@
         }
     }
 
-    // ── Patch renderOpenTable to add sym-link ─────────────────────────────────
-    var _origRenderOpenTable = renderOpenTable;
-    function renderOpenTable(positions) {
-        _origRenderOpenTable(positions);
-        // Already embedded in the new version below - no-op
-    }
-
     // Initial load
     fetchAndRender();
 
