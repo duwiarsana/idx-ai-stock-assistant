@@ -269,10 +269,11 @@ async def crypto_positions_summary():
         ]
         
         # Fetch actual USDT balance from Tokocrypto
-        from app.data.tokocrypto_client import tokocrypto_client
+        from app.data.tokocrypto_trade_client import TokoCryptoTradeClient
         usdt_balance = 0.0
         try:
-            acc = await tokocrypto_client.fetch_account_info()
+            trade_client = TokoCryptoTradeClient()
+            acc = await trade_client.fetch_account_info()
             for bal in acc.get("balances", []):
                 if bal.get("asset") == "USDT":
                     usdt_balance = float(bal.get("free", 0))
