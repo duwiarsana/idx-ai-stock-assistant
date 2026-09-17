@@ -580,11 +580,13 @@ class RealTrader:
 
         exit_price = fill.get("price") or price
         proceeds = qty_sell * exit_price
-        # BUG FIX: Calculate PnL based on qty_sold, not full invested amount.
-        # When qty_sell < pos.quantity (due to rounding/fees), the unsold dust
-        # stays in the wallet — it should NOT be counted as a loss.
-        cost_basis = (qty_sell / qty) * (pos.invested or 0.0) if qty else 0
-        pnl = proceeds - cost_basis
+        # Calculate cost basis from entry price of the actual quantity sold.
+        # Include estimated round-trip exchange fees (0.1% buy fee already deducted + 0.1% sell taker fee)
+        entry_price_val = pos.entry_price or (pos.invested / pos.quantity if pos.quantity else exit_price)
+        cost_basis = qty_sell * entry_price_val
+        # Deduct estimated 0.1% exit fee from proceeds
+        est_exit_fee = proceeds * 0.001
+        pnl = (proceeds - est_exit_fee) - cost_basis
 
         session.add(CryptoPaperTrade(
             position_id=pos.id,
