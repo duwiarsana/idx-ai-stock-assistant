@@ -134,6 +134,9 @@ async def crypto_positions_summary():
                             continue
                         logger.warning(f"Failed to fetch bulk prices: {exc}")
                         break
+        except Exception as e:
+            logger.warning(f"Failed to query Tokocrypto: {e}")
+
         # Fallback to Binance Vision ticker if Tokocrypto fails or is rate-limited (429)
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
