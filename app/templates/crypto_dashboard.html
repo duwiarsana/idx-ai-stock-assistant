@@ -793,7 +793,7 @@
     function renderMetrics(data) {
         const positions = data.positions;
         const opens = positions.open_positions || [];
-        const stats = positions.performance_stats || [];
+        const stats = positions.stats || [];
         const real_usdt_balance = positions.real_usdt_balance || 0;
 
         _positions = opens;
