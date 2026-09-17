@@ -353,6 +353,14 @@ class RealTrader:
         if highest_seen > (pos.highest_price or entry_price):
             pos.highest_price = highest_seen
 
+        # Update and notify when dynamic trailing SL raises above previous stop_loss
+        if effective_sl and pos.stop_loss and effective_sl > pos.stop_loss * 1.002:  # at least +0.2% higher to avoid spamming
+            old_sl = pos.stop_loss
+            pos.stop_loss = effective_sl
+            logger.info(f"📈 {pos.symbol}: Trailing SL dinaikkan dari {old_sl:.6f} -> {effective_sl:.6f}")
+            if settings.crypto_real_notify:
+                asyncio.create_task(self._notify_trailing_sl(pos, old_sl, effective_sl, price))
+
         # Exit checks in priority order: SL first (including trailing), TP2,
         # TP1, then the time-based dynamic ROI release.
         # SL wick guard: tolerate a small overshoot past the stop on a single
@@ -1049,6 +1057,22 @@ class RealTrader:
             f"💹 PnL: **{pnl_str} {pos.quote}** ({pnl_pct:+.2f}%)\n"
             f"📦 Sisa {pos.quantity:.8f} lanjut ke TP2/trailing.\n"
         )
+        await self._send_telegram(text)
+
+    async def _notify_trailing_sl(self, pos, old_sl: float, new_sl: float, current_price: float) -> None:
+        profit_pct = ((new_sl - pos.entry_price) / pos.entry_price * 100) if pos.entry_price else 0
+        cur_profit = ((current_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price else 0
+        text = (
+            "📈 *REAL TRAILING SL RAISED* (uang sungguhan)\n\n"
+            f"🔹 {pos.display or pos.symbol}\n"
+            f"💵 Entry: {_fmt_price(pos.entry_price)} {pos.quote}\n"
+            f"🚀 Harga Terkini: {_fmt_price(current_price)} {pos.quote} ({cur_profit:+.2f}%)\n"
+            f"🛑 SL Lama: {_fmt_price(old_sl)} {pos.quote}\n"
+            f"🔒 SL Baru: {_fmt_price(new_sl)} {pos.quote} (Terkunci {profit_pct:+.2f}%)\n\n"
+            "✨ *Stop-Loss otomatis dinaikkan mengikuti kenaikan harga untuk mengamankan profit!*"
+        )
+        text += await self._portfolio_summary(pos.quote)
+        text += "\n_Order eksekusi real. Bukan saran investasi._"
         await self._send_telegram(text)
 
     async def _notify_bep(self, pos, bep_price: float, current_price: float, side: str = "LONG") -> None:
