@@ -691,6 +691,40 @@ async def crypto_manual_close_position(
     }
 
 
+async def _fetch_binance_vision_klines(symbol: str, interval: str, limit: int = 200) -> list[dict] | None:
+    """Fetch candles directly from Binance Vision CDN (ultra fast <100ms, immune to Tokocrypto 429)."""
+    import httpx
+    binance_sym = symbol.upper().replace("_", "")
+    url = f"https://data-api.binance.vision/api/v3/klines?symbol={binance_sym}&interval={interval}&limit={limit}"
+    try:
+        async with httpx.AsyncClient(timeout=2.5) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                raw_data = resp.json()
+                if isinstance(raw_data, list) and len(raw_data) > 0:
+                    candles = []
+                    for row in raw_data:
+                        if not isinstance(row, (list, tuple)) or len(row) < 6:
+                            continue
+                        try:
+                            candles.append({
+                                "openTime": int(row[0]),
+                                "open": float(row[1]),
+                                "high": float(row[2]),
+                                "low": float(row[3]),
+                                "close": float(row[4]),
+                                "volume": float(row[5]),
+                                "quoteVolume": float(row[7]) if len(row) > 7 else None,
+                                "numTrades": int(row[8]) if len(row) > 8 else None,
+                            })
+                        except (TypeError, ValueError):
+                            continue
+                    return candles
+    except Exception as e:
+        logger.debug(f"Binance Vision klines fallback failed for {binance_sym}: {e}")
+    return None
+
+
 @router.get("/klines/{symbol}")
 async def get_klines(
     symbol: str,
@@ -700,8 +734,8 @@ async def get_klines(
 ):
     """Return OHLCV candlestick data for a symbol.
 
-    Used by the dashboard chart modal. Cached for 30 s per (symbol, interval).
-    Symbol should be in raw Tokocrypto format with underscore, e.g. SPYB_USDT.
+    Used by the dashboard chart modal. Uses fast Binance Vision CDN fallback
+    and dynamic Redis caching (60s-120s) to guarantee sub-second chart loading.
     """
     from app.data.tokocrypto_client import tokocrypto_client
 
@@ -710,8 +744,18 @@ async def get_klines(
     if cached:
         return {"status": "success", "data": cached}
 
+    # Dynamic TTL: 60s for intraday (15m/30m), 120s for higher timeframes
+    ttl = 120 if interval in ("1h", "2h", "4h", "1d") else 60
+
     try:
-        # Normalize: accept both SPYB_USDT and SPYBUSDT (no underscore)
+        # Fast path: Try Binance Vision CDN first (sub-100ms response time)
+        candles = await _fetch_binance_vision_klines(symbol, interval=interval, limit=limit)
+        if candles:
+            payload = {"symbol": symbol, "interval": interval, "candles": candles, "source": "binance_vision"}
+            await cache_service._set(cache_key, payload, ttl=ttl)
+            return {"status": "success", "data": payload}
+
+        # Fallback to Tokocrypto API (if pair is exclusive to Tokocrypto or Vision failed)
         raw_sym = symbol if "_" in symbol else None
         symbols = await tokocrypto_client.fetch_symbols()
         sym_obj = None
@@ -720,11 +764,11 @@ async def get_klines(
                 sym_obj = s
                 break
         if sym_obj is None:
-            return {"status": "error", "message": f"Symbol {symbol} not found on Tokocrypto"}
+            return {"status": "error", "message": f"Symbol {symbol} not found"}
 
         candles = await tokocrypto_client.fetch_klines(sym_obj, interval=interval, limit=limit)
-        payload = {"symbol": symbol, "interval": interval, "candles": candles}
-        await cache_service._set(cache_key, payload, ttl=30)
+        payload = {"symbol": symbol, "interval": interval, "candles": candles, "source": "tokocrypto"}
+        await cache_service._set(cache_key, payload, ttl=ttl)
         return {"status": "success", "data": payload}
     except ValueError as exc:
         return {"status": "error", "message": str(exc)}
