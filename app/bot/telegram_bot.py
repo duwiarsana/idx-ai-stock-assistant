@@ -31,6 +31,12 @@ from app.bot.middleware import error_handler, rate_limit_middleware
 from app.scheduler.jobs import create_scheduler
 
 
+async def _proxy_crypto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, subcommand: str) -> None:
+    """Helper to dispatch shortcut commands (/portofolio, /posisi, /riwayat) to crypto_handler."""
+    context.args = [subcommand] + (context.args or [])
+    await crypto_handler(update, context)
+
+
 async def log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log every incoming update for debugging."""
     msg = update.message or update.edited_message or update.channel_post
@@ -62,6 +68,9 @@ async def post_init(application: Application) -> None:
         BotCommand("stock", "Cek harga saham (contoh: /stock BBCA)"),
         BotCommand("analyze", "Analisis AI saham (contoh: /analyze BBCA)"),
         BotCommand("stocks", "Saham potensial dari scanner IDX"),
+        BotCommand("portofolio", "Portofolio real bot crypto (saldo & PnL)"),
+        BotCommand("posisi", "Posisi real crypto yang sedang terbuka"),
+        BotCommand("riwayat", "Riwayat 10 transaksi real terakhir"),
         BotCommand("crypto", "Scanner crypto Tokocrypto"),
     ]
     await application.bot.set_my_commands(commands)
@@ -97,6 +106,14 @@ def create_bot() -> Application:
     app.add_handler(CommandHandler("analyze", analyze_handler))
     app.add_handler(CommandHandler("a", analyze_handler))  # shortcut
     app.add_handler(CommandHandler("crypto", crypto_handler))
+    app.add_handler(CommandHandler("portofolio", lambda u, c: _proxy_crypto_cmd(u, c, "portfolio")))
+    app.add_handler(CommandHandler("portfolio", lambda u, c: _proxy_crypto_cmd(u, c, "portfolio")))
+    app.add_handler(CommandHandler("porto", lambda u, c: _proxy_crypto_cmd(u, c, "portfolio")))
+    app.add_handler(CommandHandler("saldo", lambda u, c: _proxy_crypto_cmd(u, c, "portfolio")))
+    app.add_handler(CommandHandler("posisi", lambda u, c: _proxy_crypto_cmd(u, c, "positions")))
+    app.add_handler(CommandHandler("positions", lambda u, c: _proxy_crypto_cmd(u, c, "positions")))
+    app.add_handler(CommandHandler("riwayat", lambda u, c: _proxy_crypto_cmd(u, c, "history")))
+    app.add_handler(CommandHandler("history", lambda u, c: _proxy_crypto_cmd(u, c, "history")))
     app.add_handler(CommandHandler("stocks", stocks_handler))  # IDX stock scanner
     app.add_handler(CommandHandler("saham", stocks_handler))  # shortcut
 

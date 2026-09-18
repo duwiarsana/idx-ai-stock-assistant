@@ -14,10 +14,19 @@ Saya adalah asisten analisis saham Indonesia (IDX) berbasis AI. Saya dapat memba
 ━━━━━━━━━━━━━━━━━━━━━━
 📋 **Perintah yang tersedia:**
 
+📊 **Crypto Bot & Portofolio (Real Tokocrypto):**
+💼 `/portofolio` — Ringkasan saldo, PnL & posisi
+📈 `/posisi` — Posisi crypto real yang aktif berjalan
+📜 `/riwayat` — 10 transaksi real terakhir
+🪙 `/crypto` — Status scanner koin & sinyal
+
+📈 **Saham IDX:**
 📊 `/stock BBCA` — Cek harga saham
-🔍 `/analyze BBCA` — Analisis AI lengkap
-🪙 `/crypto` — Scanner crypto Tokocrypto
-❓ `/help` — Tampilkan bantuan
+🔍 `/analyze BBCA` — Analisis AI lengkap saham
+🎯 `/stocks` — Saham potensial dari scanner IDX
+
+❓ `/help` — Tampilkan panduan lengkap
+━━━━━━━━━━━━━━━━━━━━━━
 
 💡 **Tips:** Anda juga bisa langsung ketik kode saham (contoh: `BBCA`)
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -26,7 +35,7 @@ Saya adalah asisten analisis saham Indonesia (IDX) berbasis AI. Saya dapat memba
 """
 
 HELP_MESSAGE = """
-📖 **Panduan IDX AI Stock Assistant**
+📖 **Panduan IDX AI Stock & Crypto Assistant**
 
 ━━━━━━━━━━━━━━━━━━━━━━
 📋 **Semua Perintah:**
@@ -34,19 +43,19 @@ HELP_MESSAGE = """
 /start — Mulai & sambutan
 /help — Bantuan ini
 
-/stock BBCA — Cek harga saham
-   (alias: /s BBCA)
+💼 **Crypto Bot (Real Trading):**
+/portofolio (atau /porto) — Total saldo, modal terpakai & PnL
+/posisi — Detail koin yang sedang di-hold, floating PnL, TP, SL
+/riwayat — 10 riwayat transaksi sell/buy terakhir
+/crypto — Status scanner Tokocrypto
+/crypto scan — Jalankan scan momentum manual
+/crypto alerts — Riwayat alert sinyal masuk
 
-/analyze BBCA — Analisis AI lengkap
-   (alias: /a BBCA)
-
-/crypto — Status scanner crypto Tokocrypto
-/crypto scan — Jalankan scan crypto manual
-/crypto alerts — Riwayat alert crypto
-   (opsi: /crypto scan --dry untuk simulasi)
-
-Ketik `BBCA` — Info harga otomatis
-   (tanpa perintah)
+📊 **Saham IDX:**
+/stock BBCA — Cek harga saham (alias: /s BBCA)
+/analyze BBCA — Analisis AI lengkap (alias: /a BBCA)
+/stocks — Saham potensial IDX
+Ketik langsung `BBCA` — Info harga otomatis
 
 ━━━━━━━━━━━━━━━━━━━━━━
 📊 **Contoh Saham Populer:**

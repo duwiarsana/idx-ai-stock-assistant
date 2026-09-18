@@ -26,21 +26,26 @@ MAX_TELEGRAM_MSG_LENGTH = 4096
 
 
 CRYPTO_HELP_MESSAGE = """
-🪙 **Crypto Scanner (Tokocrypto)**
+🪙 **Crypto Bot & Scanner (Tokocrypto)**
 
 Berikut perintah yang tersedia:
 
-/crypto — Status & kandidat terbaru
-/crypto scan — Jalankan scan manual
-   (kirim alert ke Telegram)
-/crypto scan --dry — Scan simulasi
-   (tidak kirim alert / AI)
-/crypto alerts — Riwayat alert terkirim
-/crypto paper — Status paper trading (simulasi)
-/crypto paper positions — Posisi terbuka (paper)
-/crypto paper history — Riwayat transaksi (paper)
-/crypto help — Bantuan ini
+📊 **Portofolio & Posisi Real:**
+• `/portofolio` atau `/porto` — Ringkasan saldo, PnL & posisi terbuka
+• `/posisi` — Detail posisi real yang sedang berjalan
+• `/riwayat` — 10 transaksi real terakhir
 
+🔍 **Scanner & Sinyal:**
+• `/crypto` — Status scanner & koin kandidat
+• `/crypto scan` — Jalankan scan manual sekarang
+• `/crypto alerts` — Riwayat sinyal/alert terkirim
+
+📝 **Paper Trading (Simulasi):**
+• `/crypto paper` — Status paper trading
+• `/crypto paper positions` — Posisi paper terbuka
+• `/crypto paper history` — Riwayat transaksi paper
+
+❓ `/crypto help` — Tampilkan bantuan ini
 ━━━━━━━━━━━━━━━━━━━━━━
 ⚠️ *Informasi bukan saran investasi.*
 """
@@ -57,8 +62,14 @@ async def crypto_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _crypto_scan(update, context)
     elif sub == "alerts":
         await _crypto_alerts(update, context)
-    elif sub == "paper":
+    elif sub in ("paper", "simulasi"):
         await _crypto_paper(update, context)
+    elif sub in ("portfolio", "portofolio", "porto", "saldo"):
+        await _crypto_real_portfolio(update, context)
+    elif sub in ("positions", "posisi", "pos"):
+        await _crypto_real_positions(update, context)
+    elif sub in ("history", "riwayat"):
+        await _crypto_real_history(update, context)
     elif sub in ("help", "bantuan"):
         await update.message.reply_text(CRYPTO_HELP_MESSAGE, parse_mode="Markdown")
     else:
@@ -382,3 +393,121 @@ async def _crypto_paper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "❌ Tidak bisa memuat data paper trading (database tidak tersedia).",
             parse_mode="Markdown",
         )
+
+
+async def _crypto_real_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show REAL portfolio summary with cash balance, open holdings, and realized PnL."""
+    try:
+        from app.services.crypto_real import real_trader
+        summary = await real_trader._portfolio_summary("USDT")
+        if not summary or not summary.strip():
+            await update.message.reply_text("📭 Belum ada data portofolio real.", parse_mode="Markdown")
+            return
+        await update.message.reply_text(summary.strip(), parse_mode="Markdown")
+    except Exception as e:
+        logger.warning(f"Failed to load real portfolio: {e}")
+        await update.message.reply_text(f"❌ Gagal memuat portofolio: {e}", parse_mode="Markdown")
+
+
+async def _crypto_real_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show detailed open positions currently active on REAL account."""
+    try:
+        from sqlalchemy import select, desc
+        from app.db.session import async_session_factory
+        from app.models.crypto import CryptoPaperPosition
+        from app.services.crypto_real import real_trader
+
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(CryptoPaperPosition)
+                .where(
+                    CryptoPaperPosition.status == "OPEN",
+                    CryptoPaperPosition.mode == "REAL",
+                )
+                .order_by(desc(CryptoPaperPosition.created_at))
+            )
+            positions = result.scalars().all()
+
+        if not positions:
+            await update.message.reply_text(
+                "📭 **Tidak ada posisi REAL yang terbuka saat ini.**\n"
+                "Bot siap membuka posisi saat sinyal entry terdeteksi.",
+                parse_mode="Markdown",
+            )
+            return
+
+        lines = [f"📊 **POSISI REAL TERBUKA ({len(positions)}):**", ""]
+        for p in positions:
+            quote = p.quote or "USDT"
+            try:
+                cur_price = await real_trader._fetch_price_from_symbol(p.symbol, quote)
+            except Exception:
+                cur_price = p.entry_price or 0.0
+
+            cur_pnl = (cur_price - p.entry_price) * p.quantity if p.entry_price else 0.0
+            cur_pnl_pct = ((cur_price - p.entry_price) / p.entry_price * 100) if p.entry_price else 0.0
+            emoji = "🟢" if cur_pnl >= 0 else "🔴"
+
+            tp1_str = _fmt_price(p.take_profit_1) if p.take_profit_1 else "—"
+            tp2_str = _fmt_price(p.take_profit_2) if p.take_profit_2 else "—"
+            sl_str = _fmt_price(p.stop_loss) if p.stop_loss else "—"
+
+            lines.append(
+                f"{emoji} **{p.display or p.symbol}**\n"
+                f"   💵 Entry: {_fmt_price(p.entry_price)} | Now: {_fmt_price(cur_price)}\n"
+                f"   📦 Qty: {p.quantity:.4f} (≈ {p.quantity * cur_price:.2f} {quote})\n"
+                f"   💹 Floating PnL: **{cur_pnl:+.4f} {quote}** ({cur_pnl_pct:+.2f}%)\n"
+                f"   🎯 TP1: {tp1_str} | TP2: {tp2_str}\n"
+                f"   🛑 SL: {sl_str}\n"
+            )
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("💡 _Gunakan /portofolio untuk total saldo & riwayat akumulasi._")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        logger.warning(f"Failed to load real positions: {e}")
+        await update.message.reply_text(f"❌ Gagal memuat posisi terbuka: {e}", parse_mode="Markdown")
+
+
+async def _crypto_real_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show recent 10 closed REAL trades."""
+    try:
+        from sqlalchemy import select, desc
+        from app.db.session import async_session_factory
+        from app.models.crypto import CryptoPaperPosition
+
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(CryptoPaperPosition)
+                .where(
+                    CryptoPaperPosition.status == "CLOSED",
+                    CryptoPaperPosition.mode == "REAL",
+                )
+                .order_by(desc(CryptoPaperPosition.closed_at))
+                .limit(10)
+            )
+            trades = result.scalars().all()
+
+        if not trades:
+            await update.message.reply_text("📭 Belum ada riwayat transaksi REAL.", parse_mode="Markdown")
+            return
+
+        lines = ["📜 **10 TRANSAKSI REAL TERAKHIR:**", ""]
+        for t in trades:
+            quote = t.quote or "USDT"
+            pnl = t.realized_pnl or 0.0
+            pnl_pct = (pnl / t.invested * 100) if t.invested and t.invested > 0 else 0.0
+            emoji = "🟢" if pnl >= 0 else "🔴"
+            exit_time = t.closed_at.astimezone().strftime("%d/%m %H:%M") if t.closed_at else ""
+
+            lines.append(
+                f"{emoji} **{t.display or t.symbol}** [{t.exit_reason or 'CLOSED'}]\n"
+                f"   💵 In: {_fmt_price(t.entry_price)} ➔ Out: {_fmt_price(t.exit_price)}\n"
+                f"   💹 PnL: **{pnl:+.4f} {quote}** ({pnl_pct:+.2f}%) · {exit_time}\n"
+            )
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        logger.warning(f"Failed to load real history: {e}")
+        await update.message.reply_text(f"❌ Gagal memuat riwayat: {e}", parse_mode="Markdown")
