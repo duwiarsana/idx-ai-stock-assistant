@@ -52,6 +52,8 @@ services:
       - postgres
       - redis
     volumes:
+      # Mount code so updates apply immediately on container restart
+      - ./app:/app/app
       # Persist ML models: without this mount every rebuild wiped the trained
       # model and the weekly retrain silently lost its work.
       - ./data:/app/data
