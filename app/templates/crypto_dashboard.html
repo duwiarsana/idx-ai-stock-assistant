@@ -123,18 +123,28 @@
             border-radius: 10px;
             padding: 14px 16px;
             transition: border-color 0.2s;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 108px;
         }
         .metric-card:hover { border-color: var(--border-bright); }
         .metric-label {
             font-size: 10px; font-weight: 600; text-transform: uppercase;
-            letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 6px;
-            display: flex; align-items: center; gap: 5px;
+            letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 8px;
+            display: flex; align-items: center; justify-content: space-between; gap: 6px;
+            min-height: 20px;
+            white-space: nowrap;
         }
         .metric-value {
             font-size: 22px; font-weight: 800; font-family: 'JetBrains Mono';
-            line-height: 1;
+            line-height: 1.1;
+            margin-bottom: 4px;
         }
-        .metric-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+        .metric-sub {
+            font-size: 11px; color: var(--text-muted);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
 
         .text-green { color: var(--green); }
         .text-red { color: var(--red); }
@@ -452,29 +462,38 @@
         <!-- Metrics Row -->
         <div class="metrics-bar">
             <div class="metric-card">
-                <div class="metric-label">💼 Modal Aktif (Open)</div>
+                <div class="metric-label">
+                    <span>💼 Modal Aktif (Open)</span>
+                </div>
                 <div class="metric-value text-white mono" id="mInvested">—</div>
                 <div class="metric-sub" id="mOpenCount">—</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">📊 Gross Unrealized PnL</div>
+                <div class="metric-label">
+                    <span>📊 Gross Unrealized PnL</span>
+                </div>
                 <div class="metric-value mono" id="mGrossPnL">—</div>
                 <div class="metric-sub" id="mGrossSub">Sebelum potongan fee</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">✅ Net PnL (Est. Sesudah Fee)
-                    <span style="font-size:9px;padding:1px 5px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:3px;color:var(--accent)">0.1% EXIT FEE</span>
+                <div class="metric-label">
+                    <span>✅ Net PnL (Est.)</span>
+                    <span style="font-size:9px;padding:1px 5px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:3px;color:var(--accent);flex-shrink:0;">0.1% FEE</span>
                 </div>
                 <div class="metric-value mono" id="mNetPnL">—</div>
                 <div class="metric-sub" id="mNetSub">Jika semua posisi di-close sekarang</div>
             </div>
             <div class="metric-card" style="border-color: var(--red-border)">
-                <div class="metric-label"><span class="badge-real" style="font-size:9px">REAL</span> &nbsp;Realized PnL (Closed)</div>
+                <div class="metric-label">
+                    <span style="display:flex;align-items:center;gap:5px"><span class="badge-real" style="font-size:9px">REAL</span> Realized PnL (Closed)</span>
+                </div>
                 <div class="metric-value mono" id="mRealPnL">—</div>
                 <div class="metric-sub" id="mRealWR">—</div>
             </div>
             <div class="metric-card" style="border-color:rgba(16,217,135,0.15)">
-                <div class="metric-label"><span class="badge-real" style="font-size:9px">REAL</span> &nbsp;Saldo Tersedia</div>
+                <div class="metric-label">
+                    <span style="display:flex;align-items:center;gap:5px"><span class="badge-real" style="font-size:9px">REAL</span> Saldo Tersedia</span>
+                </div>
                 <div class="metric-value mono" id="mRealBalance">—</div>
                 <div class="metric-sub" id="mRealBalanceSub">USDT balance on Tokocrypto</div>
             </div>
