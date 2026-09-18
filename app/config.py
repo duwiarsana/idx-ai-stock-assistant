@@ -340,6 +340,10 @@ class Settings(BaseSettings):
     dashboard_username: str = "duwiarsana"
     dashboard_password: str = "bait695mash215"
 
+    # ── Trade Stats Display Offset ───────────────────
+    # Number of historical trade records to offset/deduct from stats display (Telegram & Dashboard)
+    crypto_trade_stats_offset: int = 100
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

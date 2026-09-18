@@ -1135,6 +1135,7 @@ async def test_portfolio_summary_includes_stats_with_no_open_positions(monkeypat
     import app.db.session as db_session
     orig_factory = db_session.async_session_factory
     monkeypatch.setattr(db_session, "async_session_factory", lambda: FakeSession())
+    monkeypatch.setattr(get_settings(), "crypto_trade_stats_offset", 0)
 
     text = await t._portfolio_summary("USDT")
 

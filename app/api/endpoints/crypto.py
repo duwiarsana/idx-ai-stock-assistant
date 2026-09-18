@@ -354,19 +354,28 @@ async def crypto_positions_summary(user: str = Depends(verify_dashboard_auth)):
             for p in closed_positions
         ]
         
-        stats_data = [
-            {
+        stats_data = []
+        offset = getattr(settings, "crypto_trade_stats_offset", 0)
+        for s in stats_rows:
+            raw_total = s.total or 0
+            raw_wins = int(s.wins or 0)
+            raw_losses = int(s.losses or 0)
+
+            disp_total = max(0, raw_total - offset)
+            win_ratio = (raw_wins / raw_total) if raw_total > 0 else 0.5
+            disp_wins = min(disp_total, max(0, round(raw_wins - offset * win_ratio)))
+            disp_losses = max(0, disp_total - disp_wins)
+
+            stats_data.append({
                 "mode": s.mode,
-                "total_trades": s.total,
+                "total_trades": disp_total,
                 "open_positions": open_count_by_mode.get(s.mode, 0),
-                "wins": int(s.wins or 0),
-                "losses": int(s.losses or 0),
-                "win_rate": round((s.wins / s.total * 100), 1) if s.total and s.total > 0 else 0,
+                "wins": disp_wins,
+                "losses": disp_losses,
+                "win_rate": round((disp_wins / disp_total * 100), 1) if disp_total > 0 else 0,
                 "total_pnl": round(s.total_pnl, 2),
                 "avg_pnl": round(s.avg_pnl, 4) if s.avg_pnl else 0,
-            }
-            for s in stats_rows
-        ]
+            })
         
         # Fetch actual USDT balance from Tokocrypto
         from app.data.tokocrypto_trade_client import TokoCryptoTradeClient

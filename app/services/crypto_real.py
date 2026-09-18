@@ -1240,7 +1240,13 @@ class RealTrader:
             line += f"💵 *TOTAL VALUE: **{_fmt_price(total_value)} {quote}***\n\n"
         
         line += f"{pnl_emoji} Total Realized PnL: **{realized:+,.2f} {quote}**\n"
-        line += f"📊 Total Trade: {total_trades} ({winning} menang, {total_trades - winning} rugi)\n"
+        # Deduct offset to keep trade counts smaller as requested by user
+        offset = getattr(settings, "crypto_trade_stats_offset", 0)
+        disp_total = max(0, total_trades - offset)
+        win_ratio = (winning / total_trades) if total_trades > 0 else 0.5
+        disp_win = min(disp_total, max(0, round(winning - offset * win_ratio)))
+        disp_loss = max(0, disp_total - disp_win)
+        line += f"📊 Total Trade: {disp_total} ({disp_win} menang, {disp_loss} rugi)\n"
         line += "━━━━━━━━━━━━━━━━━━━━"
         return line
 
