@@ -199,6 +199,17 @@ class TestExitDecision:
         # price genuinely below SL by more than 0.5% → exit.
         assert trader._decide_exit(pos, 1.234 * 0.965) == EXIT_SL
 
+    def test_sl_bep_or_profit_lock_bypasses_wick_guard(self, trader, monkeypatch):
+        """When SL is raised to/above entry (BEP or profit lock), wick guard is bypassed."""
+        from app.config import get_settings
+        monkeypatch.setattr(get_settings(), "crypto_real_sl_exit_tolerance_pct", 0.5)
+        pos = make_position()
+        # Entry is 1.234. Set SL above entry (BEP lock at +0.45%)
+        pos.stop_loss = 1.234 * 1.0045
+        # Even if price is exactly at SL (within 0.5% tolerance), it must exit immediately!
+        assert trader._decide_exit(pos, pos.stop_loss) == EXIT_SL
+        assert trader._decide_exit(pos, pos.stop_loss * 0.999) == EXIT_SL
+
     def test_sl_beats_tp_when_both_odd(self, trader):
         pos = make_position()
         # Hypothetically price below SL and above TP2 — SL must win.

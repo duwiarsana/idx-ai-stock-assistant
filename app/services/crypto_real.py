@@ -370,16 +370,29 @@ class RealTrader:
         # Exit checks in priority order: SL first (including trailing), TP2,
         # TP1, then the time-based dynamic ROI release.
         # SL wick guard: tolerate a small overshoot past the stop on a single
-        # ticker snapshot. A momentary wick below SL that recovers should not
-        # force a market sell at the bottom — exit only when price is genuinely
-        # beyond the level by more than the configured tolerance. Real
-        # breakdowns are still caught by the next 30s quick-check.
+        # ticker snapshot ONLY when the position is in an initial loss (effective_sl < entry).
+        # CRITICAL PROTECTION: If the stop-loss has already been raised to or above entry
+        # (Auto-BEP or Trailing Stop profit lock), NEVER apply wick guard! Any drop to/below
+        # effective_sl must trigger an immediate exit to guarantee capital protection
+        # and prevent turning a break-even/profit trade into an accidental loss.
         if effective_sl and price <= effective_sl:
+            side = (getattr(pos, "side", None) or getattr(pos, "direction", "LONG") or "LONG").upper()
+            is_profit_or_bep = (
+                (side != "SHORT" and effective_sl >= entry_price) or
+                (side == "SHORT" and effective_sl <= entry_price)
+            )
+            if is_profit_or_bep:
+                logger.info(
+                    f"🛡️ {pos.symbol}: BEP / Profit Lock SL reached @ {price:.6f} "
+                    f"(SL={effective_sl:.6f}, Entry={entry_price:.6f}) — executing immediate exit"
+                )
+                return EXIT_SL
+
             tol = settings.crypto_real_sl_exit_tolerance_pct / 100.0
             if tol <= 0 or price < effective_sl * (1 - tol):
                 return EXIT_SL
             logger.debug(
-                f"⏳ {pos.symbol}: price={price:.6f} within {tol*100:.1f}% of SL "
+                f"⏳ {pos.symbol}: price={price:.6f} within {tol*100:.1f}% of initial SL "
                 f"{effective_sl:.6f} — holding for recovery (wick guard)"
             )
             return None

@@ -169,9 +169,17 @@ class PaperTrader:
 
         # Exit checks in priority order: SL first (including trailing), then TP2,
         # TP1, then the time-based dynamic ROI release.
-        # Wick guard mirrors the real engine: skip SL unless price is genuinely
-        # beyond the stop (a momentary dip then recovery shouldn't lock a loss).
+        # Wick guard mirrors the real engine: only for initial loss positions.
+        # If SL is at or above entry (BEP / profit lock), exit immediately.
         if effective_sl and price <= effective_sl:
+            side = (getattr(pos, "side", None) or getattr(pos, "direction", "LONG") or "LONG").upper()
+            is_profit_or_bep = (
+                (side != "SHORT" and effective_sl >= entry_price) or
+                (side == "SHORT" and effective_sl <= entry_price)
+            )
+            if is_profit_or_bep:
+                return EXIT_SL
+
             tol = settings.crypto_real_sl_exit_tolerance_pct / 100.0
             if tol <= 0 or price < effective_sl * (1 - tol):
                 return EXIT_SL
