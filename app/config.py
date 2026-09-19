@@ -204,7 +204,7 @@ class Settings(BaseSettings):
     # threshold ("dust trap" — the position becomes impossible to close).
     crypto_real_min_position_quote: float = 7.0
     # Max simultaneously open real positions.
-    crypto_real_max_positions: int = 3
+    crypto_real_max_positions: int = 5
     # Min momentum score to open a real position (higher = more selective).
     # NOTE: entry-score gating is unchanged (75); the trailing-stop loosening is
     # the primary lever — tightening the score floor before measuring the
