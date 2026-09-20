@@ -199,6 +199,20 @@ class PaperTrader:
                 f"{(price - entry_price) / entry_price * 100:.2f}%"
             )
             return roi
+
+        # Stale position timeout cut: if held >= N hours and floating loss >= stale_loss_pct, close early
+        stale_hours = getattr(settings, "crypto_real_stale_timeout_hours", 6.0)
+        stale_loss_pct = getattr(settings, "crypto_real_stale_loss_pct", 1.5)
+        created = getattr(pos, "created_at", None)
+        if stale_hours > 0 and created and entry_price:
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
+            if age_hours >= stale_hours:
+                floating_loss_pct = (entry_price - price) / entry_price * 100.0
+                if floating_loss_pct >= stale_loss_pct:
+                    return EXIT_SL
+
         return None
 
     async def _close_position(self, session, pos, account, action: str, price: float):
@@ -442,6 +456,12 @@ class PaperTrader:
         tp1 = levels.get("take_profit_1")
         tp2 = levels.get("take_profit_2")
         sl = levels.get("stop_loss")
+
+        # Hard floor stop-loss: maximum % below entry price
+        max_sl_pct = getattr(settings, "crypto_real_max_sl_pct", 3.0) / 100.0
+        hard_floor = price * (1.0 - max_sl_pct)
+        if sl is None or sl < hard_floor:
+            sl = hard_floor
 
         # Store ATR for trailing stop calculation
         tf_summaries = c.get("tf_summaries") or {}

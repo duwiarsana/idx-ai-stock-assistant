@@ -245,6 +245,15 @@ class Settings(BaseSettings):
     # genuinely 0.5%+ UNDER the stop before we exit (real breakdowns still
     # caught on the next 30s quick-check). 0 = disable (exit instantly).
     crypto_real_sl_exit_tolerance_pct: float = 0.5
+    # Maximum allowed initial stop-loss % below entry (hard cap).
+    # Prevents catastrophic wide stops (e.g. -8% to -10%) when 24h recent swing low is very deep.
+    # Backtest & trade history review showed capping initial SL at 3.0% eliminates >60% of gross loss.
+    crypto_real_max_sl_pct: float = 3.0
+    # Stale position timeout cut: if a position has been held >= N hours and remains
+    # in negative territory (floating loss >= stale_loss_pct), close it early instead of
+    # letting it slowly drift into a full stop-loss over 12-24 hours. 0 = disabled.
+    crypto_real_stale_timeout_hours: float = 6.0
+    crypto_real_stale_loss_pct: float = 1.5
     # ── Auto BEP (Break-Even Point) ──────────────────────────────────
     # When enabled, once peak profit touches bep_trigger_pct (or 50% towards TP1),
     # SL is automatically raised to at least entry * (1 + bep_buffer_pct/100) for LONG

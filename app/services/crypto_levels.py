@@ -102,13 +102,22 @@ def compute_price_levels(
 
     levels = PriceLevels(entry=price)
 
+    # Hard cap on initial Stop Loss: maximum allowed distance from entry (default 3.0%)
+    max_sl_pct = 3.0
+    try:
+        from app.config import get_settings
+        max_sl_pct = getattr(get_settings(), "crypto_real_max_sl_pct", 3.0)
+    except Exception:
+        pass
+    hard_sl_floor = price * (1.0 - max_sl_pct / 100.0)
+
     if above_high and high is not None:
         # Breakout / above resistance — ride the trend.
         # TP1 uses the wider breakout multiplier so R:R vs SL stays >= 1.5
         # (SL = 3×ATR, TP1 = 4.5×ATR → R:R = 1.5) and the entry gate passes.
         tp1_price = price + breakout_tp1_mult * atr
         tp2_price = price + tp2_mult * atr
-        sl_price = price - sl_mult * atr
+        sl_price = max(price - sl_mult * atr, hard_sl_floor)
         
         # Ensure TP1 floor is at least 3.5% above entry so trades can ride trends
         # while Auto BEP (+1.5%) protects capital and trailing stop locks profit.
@@ -123,7 +132,7 @@ def compute_price_levels(
         levels.entry_note = "Breakout — entry di harga pasar"
         levels.tp1_note = f"TP1 = harga + {breakout_tp1_mult}×ATR (breakout, R:R>=1.5)"
         levels.tp2_note = f"TP2 = harga + {tp2_mult}×ATR (level 2)"
-        levels.sl_note = f"SL = harga - {sl_mult}×ATR (breakout gagal)"
+        levels.sl_note = f"SL = harga - {sl_mult}×ATR (cap -{max_sl_pct}%)"
     else:
         # Range — buy near support / EMA pullback, target the resistance high.
         if high is not None:
@@ -148,11 +157,12 @@ def compute_price_levels(
         levels.tp2_note = f"TP2 = +{tp2_mult}×ATR di atas resistance"
 
         if low is not None:
-            levels.stop_loss = min(low, (price - sl_mult * atr))
-            levels.sl_note = "SL = di bawah recent low"
+            raw_sl = min(low, (price - sl_mult * atr))
+            levels.stop_loss = max(raw_sl, hard_sl_floor)
+            levels.sl_note = f"SL = di bawah recent low (cap -{max_sl_pct}%)"
         else:
-            levels.stop_loss = price - sl_mult * atr
-            levels.sl_note = f"SL = harga - {sl_mult}×ATR"
+            levels.stop_loss = max(price - sl_mult * atr, hard_sl_floor)
+            levels.sl_note = f"SL = harga - {sl_mult}×ATR (cap -{max_sl_pct}%)"
 
         if ema20 and ema20 < price:
             levels.entry = ema20

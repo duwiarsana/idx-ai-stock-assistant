@@ -428,6 +428,25 @@ class RealTrader:
                 f"profit={(price - entry_price) / entry_price * 100:.2f}%"
             )
             return roi
+
+        # Stale position timeout cut: if held >= N hours (default 6h) and floating loss >= stale_loss_pct (default 1.5%),
+        # cut loss early rather than holding a dead/drifting coin for 12-24h into a deep breakdown.
+        stale_hours = getattr(settings, "crypto_real_stale_timeout_hours", 6.0)
+        stale_loss_pct = getattr(settings, "crypto_real_stale_loss_pct", 1.5)
+        created = getattr(pos, "created_at", None)
+        if stale_hours > 0 and created and entry_price:
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
+            if age_hours >= stale_hours:
+                floating_loss_pct = (entry_price - price) / entry_price * 100.0
+                if floating_loss_pct >= stale_loss_pct:
+                    logger.info(
+                        f"⌛ {pos.symbol}: Stale position timeout exit — held {age_hours:.1f}h "
+                        f"(threshold {stale_hours}h), loss=-{floating_loss_pct:.2f}% (threshold -{stale_loss_pct}%)"
+                    )
+                    return EXIT_SL
+
         return None
 
     async def _close_position(self, session, pos, account, action: str, price: float) -> bool:
@@ -856,6 +875,13 @@ class RealTrader:
         levels = c.get("price_levels") or {}
         account = await self._get_or_create_account(session, quote)
 
+        # Enforce hard cap on initial stop-loss: maximum allowed % below actual fill price
+        max_sl_pct = getattr(settings, "crypto_real_max_sl_pct", 3.0) / 100.0
+        hard_floor_sl = exec_price * (1.0 - max_sl_pct)
+        initial_sl = levels.get("stop_loss")
+        if initial_sl is None or initial_sl < hard_floor_sl:
+            initial_sl = hard_floor_sl
+
         pos = CryptoPaperPosition(
             symbol=symbol,
             base=c.get("base"),
@@ -868,7 +894,7 @@ class RealTrader:
             invested=exec_price * qty_filled,
             take_profit_1=levels.get("take_profit_1"),
             take_profit_2=levels.get("take_profit_2"),
-            stop_loss=levels.get("stop_loss"),
+            stop_loss=initial_sl,
             entry_score=c.get("score"),
             entry_reason=levels.get("entry_note"),
             atr_value=levels.get("atr"),
