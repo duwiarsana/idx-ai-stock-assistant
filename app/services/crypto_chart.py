@@ -236,8 +236,8 @@ def generate_candlestick_chart(
             ax1.axhline(sl_p, color="#f43f5e", linestyle="--", linewidth=1.4, zorder=5, label=f"SL ({sl_p:g})")
 
     # Title & Labels
-    trend_arrow = "🟢 ▲" if pct_change >= 0 else "🔴 ▼"
-    title_text = f"{symbol_display}  [{interval.upper()}]   {last_price:g} USDT   {trend_arrow} {pct_change:+.2f}%"
+    trend_arrow = "▲" if pct_change >= 0 else "▼"
+    title_text = f"{symbol_display}  [{interval.upper()}]   {last_price:g} USDT   ({trend_arrow} {pct_change:+.2f}%)"
     ax1.set_title(title_text, color="#f8fafc", fontsize=13, fontweight="bold", pad=12, loc="left")
 
     ax1.legend(
