@@ -34,6 +34,7 @@ Berikut perintah yang tersedia:
 • `/portofolio` atau `/porto` — Ringkasan saldo, PnL & posisi terbuka
 • `/posisi` — Detail posisi real yang sedang berjalan
 • `/riwayat` — 10 transaksi real terakhir
+• `/detail <koin>` — Chart candlestick & analisa koin (misal: `/detail POL`)
 
 🔍 **Scanner & Sinyal:**
 • `/crypto` — Status scanner & koin kandidat
@@ -511,3 +512,151 @@ async def _crypto_real_history(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.warning(f"Failed to load real history: {e}")
         await update.message.reply_text(f"❌ Gagal memuat riwayat: {e}", parse_mode="Markdown")
+
+
+async def crypto_detail_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show detailed coin technicals and candlestick chart for /detail <coin>."""
+    args = context.args or []
+    if not args:
+        # Check if there are open positions and suggest them
+        try:
+            from sqlalchemy import select
+            from app.db.session import async_session_factory
+            from app.models.crypto import CryptoPaperPosition
+
+            async with async_session_factory() as session:
+                res = await session.execute(
+                    select(CryptoPaperPosition.symbol)
+                    .where(CryptoPaperPosition.status == "OPEN", CryptoPaperPosition.mode == "REAL")
+                )
+                open_syms = [r[0] for r in res.all()]
+        except Exception:
+            open_syms = []
+
+        hint_txt = "❓ **Format Perintah:** `/detail <nama_koin>`\n\nContoh:\n• `/detail POL`\n• `/detail BTC`\n• `/detail ACE`"
+        if open_syms:
+            hint_txt += "\n\n📊 **Posisi Real Terbuka Saat Ini:**\n" + "\n".join(
+                f"• `/detail {s.split('_')[0]}`" for s in open_syms
+            )
+        await update.message.reply_text(hint_txt, parse_mode="Markdown")
+        return
+
+    raw_coin = args[0].strip().upper()
+    # Normalize: POL -> POL_USDT, POLUSDT -> POL_USDT, POL/USDT -> POL_USDT
+    clean_sym = raw_coin.replace("/", "_")
+    if "_" not in clean_sym:
+        clean_sym += "_USDT"
+
+    display_name = clean_sym.replace("_", "/")
+    await update.message.chat.send_action("upload_photo")
+
+    try:
+        from app.services.crypto_chart import fetch_klines_for_chart, generate_candlestick_chart, calculate_rsi
+        from sqlalchemy import select
+        from app.db.session import async_session_factory
+        from app.models.crypto import CryptoPaperPosition
+
+        # 1. Check if there is an active open position for this coin
+        pos_data = None
+        async with async_session_factory() as session:
+            res = await session.execute(
+                select(CryptoPaperPosition)
+                .where(
+                    CryptoPaperPosition.symbol == clean_sym,
+                    CryptoPaperPosition.status == "OPEN",
+                    CryptoPaperPosition.mode == "REAL",
+                )
+                .order_by(CryptoPaperPosition.created_at.desc())
+                .limit(1)
+            )
+            open_pos = res.scalars().first()
+            if open_pos:
+                pos_data = {
+                    "entry_price": open_pos.entry_price,
+                    "take_profit_1": open_pos.take_profit_1,
+                    "take_profit_2": open_pos.take_profit_2,
+                    "stop_loss": open_pos.stop_loss,
+                    "quantity": open_pos.quantity,
+                    "invested": open_pos.invested,
+                }
+
+        # 2. Fetch candles (15m interval, 60 candles)
+        candles = await fetch_klines_for_chart(clean_sym, interval="15m", limit=60)
+        if not candles or len(candles) < 5:
+            await update.message.reply_text(
+                f"❌ Data candlestick tidak ditemukan untuk **{display_name}** di Tokocrypto/Binance.\nPastikan simbol koin benar.",
+                parse_mode="Markdown",
+            )
+            return
+
+        # 3. Render dark candlestick chart image
+        chart_buf = generate_candlestick_chart(
+            symbol_display=display_name,
+            candles=candles,
+            interval="15m",
+            position_data=pos_data,
+        )
+
+        # 4. Calculate technical metrics
+        closes = [c["close"] for c in candles]
+        last_price = closes[-1]
+        first_price = candles[0]["open"]
+        high_60 = max(c["high"] for c in candles)
+        low_60 = min(c["low"] for c in candles)
+        pct_60 = ((last_price - first_price) / first_price) * 100.0
+        rsi = calculate_rsi(closes)
+
+        # Build caption
+        arrow = "🟢 ▲" if pct_60 >= 0 else "🔴 ▼"
+        lines = [
+            f"📊 **DETAIL KOIN: {display_name}**",
+            f"💵 **Harga Terkini:** `{last_price:g} USDT` ({arrow} {pct_60:+.2f}% dlm 60 candle)",
+            f"📈 **High/Low (15h):** `{high_60:g}` / `{low_60:g}`",
+        ]
+        if rsi is not None:
+            rsi_status = "Overbought ⚠️" if rsi >= 70 else ("Oversold 💎" if rsi <= 30 else "Neutral")
+            lines.append(f"⚡ **RSI (14):** `{rsi}` ({rsi_status})")
+
+        if pos_data:
+            entry = pos_data["entry_price"]
+            pnl_val = (last_price - entry) * (pos_data.get("quantity") or 0.0)
+            pnl_pct = ((last_price - entry) / entry * 100.0) if entry else 0.0
+            pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+
+            lines.extend([
+                "",
+                f"💼 **STATUS POSISI REAL BOT:**",
+                f"• {pnl_emoji} Floating PnL: **{pnl_val:+.4f} USDT** ({pnl_pct:+.2f}%)",
+                f"• 💵 Entry: `{entry:g} USDT`",
+            ])
+            if pos_data.get("take_profit_1"):
+                tp1 = pos_data['take_profit_1']
+                dist_tp1 = ((tp1 - last_price) / last_price * 100.0) if last_price else 0.0
+                lines.append(f"• 🎯 TP1: `{tp1:g} USDT` ({dist_tp1:+.2f}% lagi)")
+            if pos_data.get("stop_loss"):
+                sl = pos_data['stop_loss']
+                dist_sl = ((sl - last_price) / last_price * 100.0) if last_price else 0.0
+                is_bep = sl >= entry
+                bep_mark = " (BEP Locked 🔒)" if is_bep else ""
+                lines.append(f"• 🛑 Stop Loss: `{sl:g} USDT` ({dist_sl:+.2f}%){bep_mark}")
+        else:
+            lines.extend([
+                "",
+                "ℹ️ *Tidak ada posisi real terbuka untuk koin ini.*",
+            ])
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+        caption = "\n".join(lines)
+
+        if chart_buf:
+            await update.message.reply_photo(
+                photo=chart_buf,
+                caption=caption,
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(caption, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.exception(f"Error in crypto_detail_handler: {e}")
+        await update.message.reply_text(f"❌ Terjadi kesalahan saat memproses chart {display_name}: {e}", parse_mode="Markdown")

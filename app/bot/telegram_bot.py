@@ -24,7 +24,7 @@ from app.config import get_settings
 from app.bot.handlers.start import start_handler, help_handler
 from app.bot.handlers.stock import stock_handler
 from app.bot.handlers.analyze import analyze_handler
-from app.bot.handlers.crypto import crypto_handler
+from app.bot.handlers.crypto import crypto_handler, crypto_detail_handler
 from app.bot.handlers.stocks import stocks_handler
 from app.bot.handlers.nlp import nlp_handler
 from app.bot.middleware import error_handler, rate_limit_middleware
@@ -114,6 +114,9 @@ def create_bot() -> Application:
     app.add_handler(CommandHandler("positions", lambda u, c: _proxy_crypto_cmd(u, c, "positions")))
     app.add_handler(CommandHandler("riwayat", lambda u, c: _proxy_crypto_cmd(u, c, "history")))
     app.add_handler(CommandHandler("history", lambda u, c: _proxy_crypto_cmd(u, c, "history")))
+    app.add_handler(CommandHandler("detail", crypto_detail_handler))
+    app.add_handler(CommandHandler("chart", crypto_detail_handler))
+    app.add_handler(CommandHandler("pol", crypto_detail_handler))
     app.add_handler(CommandHandler("stocks", stocks_handler))  # IDX stock scanner
     app.add_handler(CommandHandler("saham", stocks_handler))  # shortcut
 
