@@ -19,11 +19,9 @@ logger = logging.getLogger(__name__)
 # fills. TP1 at 3×ATR ensures profit covers trading fees (~0.2%) + room to breathe.
 TP1_ATR_MULT = 3.0  # pullback-in-uptrend TP1 (target = resistance high)
 TP2_ATR_MULT = 5.0  # consistent spacing above TP1
-# SL 3×ATR is wider than the 2×ATR used before. 60-day backtest over 15 liquid
-# symbols with entry_score 85: WR 51.5%→55.7%, expectancy +0.95%→+1.04%/trade,
-# PF 4.30→4.33, drawdown flat (~2.35%) — fewer premature stop-outs beat the
-# slightly bigger loss per stop.
-SL_ATR_MULT = 3.0  # was 2.0 → wider SL = fewer premature stops = higher win rate
+# SL dikembalikan ke 2×ATR untuk meminimalisir nilai kerugian per transaksi (SL lebih kecil)
+# digabung dengan trailing stop yang lebih lebar agar R:R nominal jauh lebih sehat.
+SL_ATR_MULT = 2.0  # diubah dari 3.0 menjadi 2.0 untuk memperkecil kerugian
 # Breakout TP1 uses a WIDER ATR multiplier so the R:R against the 3×ATR stop is
 # >= 1.5 — matching the real-trading entry gate (CRYPTO_REAL_ENTRY_MIN_RISK_REWARD).
 # SL=3×ATR + TP1=4.5×ATR → R:R = 1.5. Without this the breakout branch produced
