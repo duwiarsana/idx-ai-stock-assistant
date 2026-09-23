@@ -367,6 +367,25 @@ class RealTrader:
             if settings.crypto_real_notify:
                 asyncio.create_task(self._notify_trailing_sl(pos, old_sl, effective_sl, price))
 
+        # 1. Stale position timeout cut: if held >= N hours (default 5h) and floating loss >= stale_loss_pct (default 1.0%),
+        # cut loss early rather than holding a dead/drifting coin for 12-28h into a deep breakdown.
+        # Must be checked BEFORE wick-guard so stagnant positions are never trapped in wick-guard limbo.
+        stale_hours = getattr(settings, "crypto_real_stale_timeout_hours", 5.0)
+        stale_loss_pct = getattr(settings, "crypto_real_stale_loss_pct", 1.0)
+        created = getattr(pos, "created_at", None)
+        if stale_hours > 0 and created and entry_price:
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
+            if age_hours >= stale_hours:
+                floating_loss_pct = (entry_price - price) / entry_price * 100.0
+                if floating_loss_pct >= stale_loss_pct:
+                    logger.info(
+                        f"⌛ {pos.symbol}: Stale position timeout exit — held {age_hours:.1f}h "
+                        f"(threshold {stale_hours}h), loss=-{floating_loss_pct:.2f}% (threshold -{stale_loss_pct}%)"
+                    )
+                    return EXIT_SL
+
         # Exit checks in priority order: SL first (including trailing), TP2,
         # TP1, then the time-based dynamic ROI release.
         # SL wick guard: tolerate a small overshoot past the stop on a single
@@ -428,24 +447,6 @@ class RealTrader:
                 f"profit={(price - entry_price) / entry_price * 100:.2f}%"
             )
             return roi
-
-        # Stale position timeout cut: if held >= N hours (default 6h) and floating loss >= stale_loss_pct (default 1.5%),
-        # cut loss early rather than holding a dead/drifting coin for 12-24h into a deep breakdown.
-        stale_hours = getattr(settings, "crypto_real_stale_timeout_hours", 6.0)
-        stale_loss_pct = getattr(settings, "crypto_real_stale_loss_pct", 1.5)
-        created = getattr(pos, "created_at", None)
-        if stale_hours > 0 and created and entry_price:
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            age_hours = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
-            if age_hours >= stale_hours:
-                floating_loss_pct = (entry_price - price) / entry_price * 100.0
-                if floating_loss_pct >= stale_loss_pct:
-                    logger.info(
-                        f"⌛ {pos.symbol}: Stale position timeout exit — held {age_hours:.1f}h "
-                        f"(threshold {stale_hours}h), loss=-{floating_loss_pct:.2f}% (threshold -{stale_loss_pct}%)"
-                    )
-                    return EXIT_SL
 
         return None
 

@@ -167,6 +167,20 @@ class PaperTrader:
         if highest_seen > (pos.highest_price or entry_price):
             pos.highest_price = highest_seen
 
+        # Stale position timeout cut: if held >= N hours and floating loss >= stale_loss_pct, close early
+        # Must be checked before wick-guard so stagnant positions are never trapped in wick-guard limbo.
+        stale_hours = getattr(settings, "crypto_real_stale_timeout_hours", 5.0)
+        stale_loss_pct = getattr(settings, "crypto_real_stale_loss_pct", 1.0)
+        created = getattr(pos, "created_at", None)
+        if stale_hours > 0 and created and entry_price:
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
+            if age_hours >= stale_hours:
+                floating_loss_pct = (entry_price - price) / entry_price * 100.0
+                if floating_loss_pct >= stale_loss_pct:
+                    return EXIT_SL
+
         # Exit checks in priority order: SL first (including trailing), then TP2,
         # TP1, then the time-based dynamic ROI release.
         # Wick guard mirrors the real engine: only for initial loss positions.
@@ -199,19 +213,6 @@ class PaperTrader:
                 f"{(price - entry_price) / entry_price * 100:.2f}%"
             )
             return roi
-
-        # Stale position timeout cut: if held >= N hours and floating loss >= stale_loss_pct, close early
-        stale_hours = getattr(settings, "crypto_real_stale_timeout_hours", 6.0)
-        stale_loss_pct = getattr(settings, "crypto_real_stale_loss_pct", 1.5)
-        created = getattr(pos, "created_at", None)
-        if stale_hours > 0 and created and entry_price:
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            age_hours = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
-            if age_hours >= stale_hours:
-                floating_loss_pct = (entry_price - price) / entry_price * 100.0
-                if floating_loss_pct >= stale_loss_pct:
-                    return EXIT_SL
 
         return None
 
