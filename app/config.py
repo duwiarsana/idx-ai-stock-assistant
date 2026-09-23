@@ -203,8 +203,8 @@ class Settings(BaseSettings):
     # means fees + a tiny adverse move push the position below the sellable
     # threshold ("dust trap" — the position becomes impossible to close).
     crypto_real_min_position_quote: float = 7.0
-    # Max simultaneously open real positions.
-    crypto_real_max_positions: int = 5
+    # Max simultaneously open real positions (focused on top 3 setups for higher position size).
+    crypto_real_max_positions: int = 3
     # Min momentum score to open a real position (higher = more selective).
     # Backtest and 327 real trade review showed score >= 78 generates consistent positive PnL (+5.8 USDT),
     # while sub-78 setups account for >80% of net negative trades.
@@ -311,7 +311,8 @@ class Settings(BaseSettings):
     # list of BASE symbols (the part before the "_USDT" suffix).
     crypto_real_symbol_blacklist: str = (
         "USD1,USDC,FDUSD,TUSD,USDP,DAI,USDS,USDE,FRAX,PYUSD,EURI,AEUR,XUSD,BFUSD,"
-        "U,RLUSD,PAXG,XAUT,WBETH,BNSOL,WBTC,WETH,WBNB,STETH,WSTETH,RETH,CBETH"
+        "U,RLUSD,PAXG,XAUT,WBETH,BNSOL,WBTC,WETH,WBNB,STETH,WSTETH,RETH,CBETH,"
+        "FET,BIO,TRX,LUNC"
     )
 
     # ── Crypto Dust Report ────────────────────────────
