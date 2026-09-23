@@ -206,11 +206,9 @@ class Settings(BaseSettings):
     # Max simultaneously open real positions.
     crypto_real_max_positions: int = 5
     # Min momentum score to open a real position (higher = more selective).
-    # NOTE: entry-score gating is unchanged (75); the trailing-stop loosening is
-    # the primary lever — tightening the score floor before measuring the
-    # trailing fix would drop 53% of trades without knowing whether the weak
-    # 80-84 bucket was bad entry or just a too-tight trail cutting winners.
-    crypto_real_entry_score: int = 75
+    # Backtest and 327 real trade review showed score >= 78 generates consistent positive PnL (+5.8 USDT),
+    # while sub-78 setups account for >80% of net negative trades.
+    crypto_real_entry_score: int = 78
     # Hard safety: stop opening new positions once realized PnL (USDT) drops
     # below this threshold. 0 = disabled.
     crypto_real_max_drawdown: float = 50.0
@@ -251,9 +249,9 @@ class Settings(BaseSettings):
     crypto_real_max_sl_pct: float = 3.0
     # Stale position timeout cut: if a position has been held >= N hours and remains
     # in negative territory (floating loss >= stale_loss_pct), close it early instead of
-    # letting it slowly drift into a full stop-loss over 12-24 hours. 0 = disabled.
-    crypto_real_stale_timeout_hours: float = 6.0
-    crypto_real_stale_loss_pct: float = 1.5
+    # letting it slowly drift into a full stop-loss over 10-24 hours. (Winners resolve in ~4h).
+    crypto_real_stale_timeout_hours: float = 5.0
+    crypto_real_stale_loss_pct: float = 1.0
     # ── Auto BEP (Break-Even Point) ──────────────────────────────────
     # When enabled, once peak profit touches bep_trigger_pct (or 50% towards TP1),
     # SL is automatically raised to at least entry * (1 + bep_buffer_pct/100) for LONG
