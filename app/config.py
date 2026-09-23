@@ -258,14 +258,19 @@ class Settings(BaseSettings):
     # When enabled, once peak profit touches bep_trigger_pct (or 50% towards TP1),
     # SL is automatically raised to at least entry * (1 + bep_buffer_pct/100) for LONG
     # or entry * (1 - bep_buffer_pct/100) for SHORT.
-    # Total BEP offset 0.15% covers exchange round-trip fees (0.05% open + 0.05% close)
-    # plus 0.05% slippage buffer.
     crypto_real_bep_enabled: bool = True
-    # Profit % above entry needed to trigger auto-BEP (default 0.8% or 50% to TP1).
-    crypto_real_bep_trigger_pct: float = 0.8
-    # Dynamic offset % to cover round-trip fee (0.20%) + market sell slippage (0.25%).
-    # Total offset 0.45% ensures positions stopped out at BEP remain safely net-profitable.
-    crypto_real_bep_buffer_pct: float = 0.45
+    # Profit % above entry needed to trigger auto-BEP (default 1.8% or 50% to TP1).
+    # Must comfortably exceed round-trip fees (1.00%).
+    crypto_real_bep_trigger_pct: float = 1.8
+    # Dynamic offset % to cover round-trip fee (1.00%) + profit buffer (0.20%).
+    # Total offset 1.20% ensures positions stopped out at BEP remain safely net-profitable.
+    crypto_real_bep_buffer_pct: float = 1.20
+
+    # ── Exchange Fees ────────────────────────────────────────────────
+    # Tokocrypto / Indonesian crypto fee is ~0.4044% per side (including PPh/ICEx).
+    # Setting 0.005 (0.50% per side, 1.00% round-trip) provides a realistic conservative
+    # buffer covering trading fees, taxes, and minor market order slippage.
+    crypto_real_fee_rate: float = 0.005
 
     # ── Freqtrade-style exits: trailing stop + dynamic ROI ────────────
     # Trailing master switch. True = legacy behaviour (trail from entry at the

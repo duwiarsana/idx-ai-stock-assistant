@@ -613,12 +613,14 @@ class RealTrader:
         exit_price = fill.get("price") or price
         proceeds = qty_sell * exit_price
         # Calculate cost basis from entry price of the actual quantity sold.
-        # Include estimated round-trip exchange fees (0.1% buy fee already deducted + 0.1% sell taker fee)
         entry_price_val = pos.entry_price or (pos.invested / pos.quantity if pos.quantity else exit_price)
         cost_basis = qty_sell * entry_price_val
-        # Deduct estimated 0.1% exit fee from proceeds
-        est_exit_fee = proceeds * 0.001
-        pnl = (proceeds - est_exit_fee) - cost_basis
+        # Deduct estimated round-trip exchange fees (covering buy fee, sell fee, taxes & buffer)
+        fee_rate = getattr(settings, "crypto_real_fee_rate", 0.005)
+        est_entry_fee = cost_basis * fee_rate
+        est_exit_fee = proceeds * fee_rate
+        total_fees = est_entry_fee + est_exit_fee
+        pnl = (proceeds - cost_basis) - total_fees
 
         session.add(CryptoPaperTrade(
             position_id=pos.id,
@@ -643,6 +645,7 @@ class RealTrader:
             pos.quantity = round(max(qty - qty_sell, 0.0), 12)
             pos.invested = max(0.0, (pos.invested or 0.0) - cost_basis)
             pos.tp1_partial_done = True
+            pos.realized_pnl = (pos.realized_pnl or 0.0) + pnl
             logger.info(
                 f"⚖️ REAL partial TP1 {pos.display or pos.symbol}: sold {qty_sell:.8f} "
                 f"@ {exit_price} pnl={pnl:+.6f} {pos.quote}; {pos.quantity:.8f} left riding to TP2"
@@ -654,7 +657,7 @@ class RealTrader:
         pos.status = STATUS_CLOSED
         pos.exit_price = exit_price
         pos.exit_reason = action
-        pos.realized_pnl = pnl
+        pos.realized_pnl = (pos.realized_pnl or 0.0) + pnl
         pos.closed_at = datetime.now(timezone.utc)
 
         # Clean up BEP notification tracking
@@ -831,7 +834,7 @@ class RealTrader:
         # round_down(qty_after_fee) * price >= min_notional. Walk the step up
         # until sellable, capped by the available balance.
         sellable = False
-        fee_rate = 0.002  # 0.2% — covers the 0.1% taker fee plus safety margin
+        fee_rate = getattr(settings, "crypto_real_fee_rate", 0.005)  # 0.5% — covers Tokocrypto 0.4044% fee + safety margin
         for _ in range(200):  # hard cap on the walk to avoid runaway
             qty_after_fee = qty * (1 - fee_rate)
             sellable_qty = self._round_down_to_step(qty_after_fee, step)
@@ -1080,7 +1083,9 @@ class RealTrader:
 
     async def _notify_close(self, pos, action: str, exit_price: float, pnl: float, account=None) -> None:
         emoji = "✅" if pnl >= 0 else "🔻"
-        pnl_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price else 0
+        cost_basis_val = (pos.quantity * pos.entry_price) if (pos.quantity and pos.entry_price) else (pos.invested or 1.0)
+        net_pnl_pct = (pnl / cost_basis_val * 100) if cost_basis_val else 0.0
+        gross_move_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price else 0.0
         # Use 4 decimals for tiny PnL values so they don't show as 0.00
         pnl_str = f"{pnl:+.4f}" if abs(pnl) < 1 else f"{pnl:+.2f}"
         text = (
@@ -1088,22 +1093,26 @@ class RealTrader:
             f"🔹 {pos.display or pos.symbol}\n"
             f"💵 Entry: {_fmt_price(pos.entry_price)} {pos.quote}\n"
             f"🏁 Exit: {_fmt_price(exit_price)} {pos.quote}\n"
-            f"💹 PnL: **{pnl_str} {pos.quote}** ({pnl_pct:+.2f}%)\n"
+            f"💹 PnL Bersih: **{pnl_str} {pos.quote}** ({net_pnl_pct:+.2f}%)\n"
+            f"📊 Pergerakan Harga: {gross_move_pct:+.2f}%\n"
         )
-        text += "🎉 *UNTUNG!*\n" if pnl >= 0 else "⚠️ *RUGI.*\n"
+        text += "🎉 *UNTUNG BERSIH!*\n" if pnl >= 0 else "⚠️ *RUGI.*\n"
         text += await self._portfolio_summary(pos.quote)
         text += "\n_Order eksekusi real. Bukan saran investasi._"
         await self._send_telegram(text)
 
     async def _notify_partial_tp1(self, pos, exit_price: float, pnl: float, qty_sold: float) -> None:
-        pnl_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price else 0
+        cost_basis_val = (qty_sold * pos.entry_price) if pos.entry_price else 1.0
+        net_pnl_pct = (pnl / cost_basis_val * 100) if cost_basis_val else 0.0
+        gross_move_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price else 0.0
         pnl_str = f"{pnl:+.4f}" if abs(pnl) < 1 else f"{pnl:+.2f}"
         text = (
             f"⚖️ *REAL PARTIAL TP1* (uang sungguhan)\n\n"
             f"🔹 {pos.display or pos.symbol}\n"
             f"💵 Entry: {_fmt_price(pos.entry_price)} {pos.quote}\n"
             f"🏁 Jual {qty_sold:.8f} @ {_fmt_price(exit_price)} {pos.quote}\n"
-            f"💹 PnL: **{pnl_str} {pos.quote}** ({pnl_pct:+.2f}%)\n"
+            f"💹 PnL Bersih: **{pnl_str} {pos.quote}** ({net_pnl_pct:+.2f}%)\n"
+            f"📊 Pergerakan Harga: {gross_move_pct:+.2f}%\n"
             f"📦 Sisa {pos.quantity:.8f} lanjut ke TP2/trailing.\n"
         )
         await self._send_telegram(text)
@@ -1130,14 +1139,17 @@ class RealTrader:
             if side == "LONG"
             else ((pos.entry_price - current_price) / pos.entry_price * 100)
         ) if pos.entry_price else 0
-        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.45)
+        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 1.20)
+        fee_rate = getattr(settings, "crypto_real_fee_rate", 0.005)
+        round_trip_fee_pct = fee_rate * 2 * 100
+        buffer_net_pct = max(0.0, buffer_pct - round_trip_fee_pct)
         text = (
             "🛡️ *REAL AUTO-BEP ACTIVATED* (uang sungguhan)\n\n"
             f"🔹 {pos.display or pos.symbol} ({side})\n"
             f"💵 Entry: {_fmt_price(pos.entry_price)} {pos.quote}\n"
             f"📈 Harga Saat Ini: {_fmt_price(current_price)} {pos.quote} ({profit_pct:+.2f}%)\n"
             f"🔒 SL Baru (BEP Lock): {_fmt_price(bep_price)} {pos.quote} (+{buffer_pct:.2f}%)\n\n"
-            f"✨ *Stop-Loss disesuaikan menutup round-trip fee (0.20%) + buffer slippage ({max(0.0, buffer_pct - 0.20):.2f}%).*\n"
+            f"✨ *Stop-Loss disesuaikan menutup round-trip fee Tokocrypto & pajak ({round_trip_fee_pct:.2f}%) + buffer ({buffer_net_pct:.2f}%).*\n"
             "Posisi kini telah RISK-FREE!"
         )
         text += await self._portfolio_summary(pos.quote)
@@ -1152,22 +1164,25 @@ class RealTrader:
         if not entry or entry <= 0:
             return
 
-        trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 0.8)
-        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.45)
+        trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 1.8)
+        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 1.20)
         side = (getattr(pos, "side", None) or getattr(pos, "direction", "LONG") or "LONG").upper()
         tp1 = getattr(pos, "take_profit_1", None)
+        min_safe_trigger = buffer_pct + 0.20
 
         if side == "SHORT":
             lowest = min(getattr(pos, "lowest_price", entry) or entry, current_price)
             profit_pct = (entry - lowest) / entry * 100.0
             half_tp1_pct = ((entry - tp1) / entry * 100.0 * 0.5) if (tp1 and tp1 < entry) else None
-            effective_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            candidate_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            effective_trigger = max(candidate_trigger, min_safe_trigger)
             bep_price = entry * (1.0 - buffer_pct / 100.0)
         else:
             highest = max(pos.highest_price or entry, current_price)
             profit_pct = (highest - entry) / entry * 100.0
             half_tp1_pct = ((tp1 - entry) / entry * 100.0 * 0.5) if (tp1 and tp1 > entry) else None
-            effective_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            candidate_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            effective_trigger = max(candidate_trigger, min_safe_trigger)
             bep_price = entry * (1.0 + buffer_pct / 100.0)
 
         if profit_pct >= effective_trigger:

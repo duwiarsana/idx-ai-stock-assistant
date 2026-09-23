@@ -83,10 +83,11 @@ def trailing_stop_effective(pos, price: float, settings=None) -> tuple[Optional[
     # plus market sell slippage (0.25%) for a true risk-free break-even.
     bep_floor: Optional[float] = None
     if getattr(settings, "crypto_real_bep_enabled", False) and entry:
-        trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 0.8)
-        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 0.45)
+        trigger_pct = getattr(settings, "crypto_real_bep_trigger_pct", 1.8)
+        buffer_pct = getattr(settings, "crypto_real_bep_buffer_pct", 1.20)
         side = (getattr(pos, "side", None) or getattr(pos, "direction", "LONG") or "LONG").upper()
         tp1 = getattr(pos, "take_profit_1", None)
+        min_safe_trigger = buffer_pct + 0.20
 
         if side == "SHORT":
             # For SHORT, profit is when price drops below entry
@@ -94,7 +95,8 @@ def trailing_stop_effective(pos, price: float, settings=None) -> tuple[Optional[
             profit_pct = (entry - lowest) / entry * 100.0
             # 50% distance towards TP1 trigger check
             half_tp1_pct = ((entry - tp1) / entry * 100.0 * 0.5) if (tp1 and tp1 < entry) else None
-            effective_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            candidate_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            effective_trigger = max(candidate_trigger, min_safe_trigger)
             if profit_pct >= effective_trigger:
                 bep_floor = entry * (1.0 - buffer_pct / 100.0)
         else:
@@ -102,7 +104,8 @@ def trailing_stop_effective(pos, price: float, settings=None) -> tuple[Optional[
             peak_profit_pct = (highest - entry) / entry * 100.0
             # 50% distance towards TP1 trigger check
             half_tp1_pct = ((tp1 - entry) / entry * 100.0 * 0.5) if (tp1 and tp1 > entry) else None
-            effective_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            candidate_trigger = min(trigger_pct, half_tp1_pct) if half_tp1_pct is not None else trigger_pct
+            effective_trigger = max(candidate_trigger, min_safe_trigger)
             if peak_profit_pct >= effective_trigger:
                 bep_floor = entry * (1.0 + buffer_pct / 100.0)
 
