@@ -223,7 +223,9 @@ class Settings(BaseSettings):
     # Real trading entry gate (stricter than paper)
     crypto_real_entry_require_uptrend: bool = True
     crypto_real_entry_require_breakout: bool = False
-    crypto_real_entry_pullback_max_pct: float = 8.0  # wider than paper (was 3%) to catch more valid setups
+    # Max allowed distance (%) above EMA20 for pullback entry. Stricter (1.5%) so we only buy
+    # near support, ensuring our stop-loss sits safely below support instead of hanging mid-air.
+    crypto_real_entry_pullback_max_pct: float = 1.5
     crypto_real_entry_min_risk_reward: float = 1.5  # minimum R:R ratio
     crypto_real_entry_max_atr_pct: float = 5.0  # max ATR% to avoid high volatility
     crypto_real_sl_cooldown_minutes: int = 180  # 3 hours cooldown after SL
