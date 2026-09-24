@@ -50,3 +50,4 @@ alembic/versions/*.pyc
 
 # ML models & training artifacts
 data/models/
+data/*.jsonl

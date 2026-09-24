@@ -99,6 +99,9 @@ class CryptoPaperPosition(Base, TimestampMixin):
     realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Detailed trade forensics & journaling (entry snapshot, in-trade telemetry, post-mortem)
+    trade_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

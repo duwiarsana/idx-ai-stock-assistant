@@ -26,6 +26,15 @@ from typing import Optional
 from app.config import get_settings
 from app.services.crypto_alert import _fmt_price
 from app.services.crypto_exits import dynamic_roi_exit, trailing_stop_effective
+from app.services.crypto_journal import (
+    append_to_journal_file,
+    build_entry_dossier,
+    build_exit_dossier,
+    record_bep_activation,
+    record_partial_tp1_fill,
+    record_trailing_update,
+    update_in_trade_telemetry,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -258,6 +267,9 @@ class RealTrader:
                 highest = pos.highest_price or pos.entry_price
                 if price > highest:
                     pos.highest_price = price
+
+                # Track in-trade telemetry (high/low watermarks, drawdowns)
+                update_in_trade_telemetry(pos, price)
                 
                 # Check auto-BEP notification trigger
                 await self._check_bep_notification(pos, price)
@@ -317,6 +329,9 @@ class RealTrader:
                 highest = pos.highest_price or pos.entry_price
                 if price > highest:
                     pos.highest_price = price
+
+                # Track in-trade telemetry (high/low watermarks, drawdowns)
+                update_in_trade_telemetry(pos, price)
                 
                 # Check auto-BEP notification trigger
                 await self._check_bep_notification(pos, price)
@@ -363,6 +378,7 @@ class RealTrader:
         if effective_sl and pos.stop_loss and effective_sl > pos.stop_loss * 1.002:  # at least +0.2% higher to avoid spamming
             old_sl = pos.stop_loss
             pos.stop_loss = effective_sl
+            record_trailing_update(pos, old_sl, effective_sl, price)
             logger.info(f"📈 {pos.symbol}: Trailing SL dinaikkan dari {old_sl:.6f} -> {effective_sl:.6f}")
             if settings.crypto_real_notify:
                 asyncio.create_task(self._notify_trailing_sl(pos, old_sl, effective_sl, price))
@@ -587,6 +603,19 @@ class RealTrader:
                 pos.closed_at = datetime.now(timezone.utc)
                 account.realized_pnl += pnl
                 account.total_trades += 1
+                build_exit_dossier(
+                    pos=pos,
+                    exit_price=exit_price,
+                    action=f"{action}_DUST",
+                    cost_basis=cost_basis,
+                    proceeds=qty_sell * exit_price,
+                    pnl=pnl,
+                    fee_rate=0.005,
+                    est_entry_fee=0.0,
+                    est_exit_fee=0.0,
+                    total_fees=0.0,
+                )
+                append_to_journal_file(pos)
                 # Don't count as winning
                 if settings.crypto_real_notify:
                     await self._notify_close(pos, f"{action}/DUST", exit_price, pnl, account)
@@ -647,6 +676,7 @@ class RealTrader:
             pos.invested = max(0.0, (pos.invested or 0.0) - cost_basis)
             pos.tp1_partial_done = True
             pos.realized_pnl = (pos.realized_pnl or 0.0) + pnl
+            record_partial_tp1_fill(pos, exit_price, pnl, qty_sell)
             logger.info(
                 f"⚖️ REAL partial TP1 {pos.display or pos.symbol}: sold {qty_sell:.8f} "
                 f"@ {exit_price} pnl={pnl:+.6f} {pos.quote}; {pos.quantity:.8f} left riding to TP2"
@@ -660,6 +690,23 @@ class RealTrader:
         pos.exit_reason = action
         pos.realized_pnl = (pos.realized_pnl or 0.0) + pnl
         pos.closed_at = datetime.now(timezone.utc)
+
+        # Build complete exit snapshot & post-mortem analysis
+        build_exit_dossier(
+            pos=pos,
+            exit_price=exit_price,
+            action=action,
+            cost_basis=cost_basis,
+            proceeds=proceeds,
+            pnl=pnl,
+            fee_rate=fee_rate,
+            est_entry_fee=est_entry_fee,
+            est_exit_fee=est_exit_fee,
+            total_fees=total_fees,
+        )
+
+        # Append to persistent JSONL journal
+        append_to_journal_file(pos)
 
         # Clean up BEP notification tracking
         self._bep_notified_positions.discard(str(pos.id))
@@ -744,6 +791,7 @@ class RealTrader:
                 return 0
 
         opened = 0
+        btc_cand = next((item for item in candidates if (item.get("symbol") or "").upper().startswith("BTC")), None)
         for c in shortlist:
             if len(open_symbols) >= settings.crypto_real_max_positions:
                 break
@@ -755,7 +803,7 @@ class RealTrader:
             if not price:
                 continue
 
-            ok = await self._open_position(session, c, price, quote)
+            ok = await self._open_position(session, c, price, quote, btc_candidate=btc_cand)
             if ok:
                 open_symbols.add(symbol)
                 opened += 1
@@ -778,7 +826,9 @@ class RealTrader:
         realized = account.realized_pnl or 0.0
         return realized >= -settings.crypto_real_max_drawdown
 
-    async def _open_position(self, session, c: dict, price: float, quote: str) -> bool:
+    async def _open_position(
+        self, session, c: dict, price: float, quote: str, btc_candidate: Optional[dict] = None
+    ) -> bool:
         from app.models.crypto import CryptoPaperPosition, CryptoPaperTrade, CryptoPaperAccount
 
         symbol = c.get("symbol")
@@ -886,6 +936,18 @@ class RealTrader:
         if initial_sl is None or initial_sl < hard_floor_sl:
             initial_sl = hard_floor_sl
 
+        strategy_mode = "BREAKOUT" if settings.crypto_real_entry_require_breakout else "PULLBACK"
+        dossier = build_entry_dossier(
+            candidate=c,
+            exec_price=exec_price,
+            initial_sl=initial_sl,
+            qty_filled=qty_filled,
+            invested=exec_price * qty_filled,
+            quote=account.quote_asset,
+            btc_candidate=btc_candidate,
+            execution_strategy=strategy_mode,
+        )
+
         pos = CryptoPaperPosition(
             symbol=symbol,
             base=c.get("base"),
@@ -903,6 +965,7 @@ class RealTrader:
             entry_reason=levels.get("entry_note"),
             atr_value=levels.get("atr"),
             highest_price=exec_price,
+            trade_metadata=dossier,
         )
         session.add(pos)
         await session.flush()
@@ -1097,8 +1160,23 @@ class RealTrader:
             f"💹 PnL Bersih: **{pnl_str} {pos.quote}** ({net_pnl_pct:+.2f}%)\n"
             f"📊 Pergerakan Harga: {gross_move_pct:+.2f}%\n"
         )
+        meta = pos.trade_metadata if isinstance(pos.trade_metadata, dict) else {}
+        exit_snap = meta.get("exit_snapshot") or {}
+        post_mortem = exit_snap.get("post_mortem") or {}
+        diag = post_mortem.get("diagnosis")
+        peak_gain = post_mortem.get("peak_floating_profit_pct", 0.0)
+        dur = exit_snap.get("duration_formatted", "")
+
+        if dur and dur != "-":
+            text += f"⏱️ Durasi: {dur}\n"
+        if peak_gain > 0:
+            text += f"📈 Peak Floating: +{peak_gain:.2f}%\n"
+        if diag:
+            text += f"🧠 *Analisa Bot:* _{diag}_\n"
+
         text += "🎉 *UNTUNG BERSIH!*\n" if pnl >= 0 else "⚠️ *RUGI.*\n"
         text += await self._portfolio_summary(pos.quote)
+        text += "\n💡 _Ketik /audit untuk analisa forensic lengkap._"
         text += "\n_Order eksekusi real. Bukan saran investasi._"
         await self._send_telegram(text)
 
@@ -1192,6 +1270,7 @@ class RealTrader:
                 self._bep_notified_positions.add(pos_key)
                 # Persist BEP stop_loss to position record in DB
                 pos.stop_loss = bep_price
+                record_bep_activation(pos, bep_price, current_price)
                 logger.info(
                     f"🛡️ {pos.symbol} ({side}): Auto-BEP triggered (profit={profit_pct:+.2f}% >= {effective_trigger:.2f}%), "
                     f"locking SL at {bep_price:.6f}"

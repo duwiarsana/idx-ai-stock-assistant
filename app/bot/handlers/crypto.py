@@ -34,6 +34,7 @@ Berikut perintah yang tersedia:
 • `/portofolio` atau `/porto` — Ringkasan saldo, PnL & posisi terbuka
 • `/posisi` — Detail posisi real yang sedang berjalan
 • `/riwayat` — 10 transaksi real terakhir
+• `/audit [koin]` — Laporan forensic & analisa detail keputusan bot
 • `/detail <koin>` — Chart candlestick & analisa koin (misal: `/detail POL`)
 
 🔍 **Scanner & Sinyal:**
@@ -71,6 +72,8 @@ async def crypto_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _crypto_real_positions(update, context)
     elif sub in ("history", "riwayat"):
         await _crypto_real_history(update, context)
+    elif sub in ("audit", "forensic", "jurnal"):
+        await crypto_audit_handler(update, context)
     elif sub in ("help", "bantuan"):
         await update.message.reply_text(CRYPTO_HELP_MESSAGE, parse_mode="Markdown")
     else:
@@ -508,6 +511,7 @@ async def _crypto_real_history(update: Update, context: ContextTypes.DEFAULT_TYP
             )
 
         lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("💡 _Ketik `/audit` atau `/audit <koin>` untuk analisa detail keputusan bot & post-mortem._")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
     except Exception as e:
         logger.warning(f"Failed to load real history: {e}")
@@ -660,3 +664,124 @@ async def crypto_detail_handler(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.exception(f"Error in crypto_detail_handler: {e}")
         await update.message.reply_text(f"❌ Terjadi kesalahan saat memproses chart {display_name}: {e}", parse_mode="Markdown")
+
+
+async def crypto_audit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Provide a comprehensive forensic breakdown and post-mortem analysis of a trade."""
+    args = context.args or []
+    filter_sym = args[0].strip().upper() if args else None
+    if filter_sym:
+        filter_sym = filter_sym.replace("/", "_")
+        if "_" not in filter_sym:
+            filter_sym += "_USDT"
+
+    await update.message.chat.send_action("typing")
+
+    try:
+        from sqlalchemy import select
+        from app.db.session import async_session_factory
+        from app.models.crypto import CryptoPaperPosition
+
+        async with async_session_factory() as session:
+            query = (
+                select(CryptoPaperPosition)
+                .where(
+                    CryptoPaperPosition.status == "CLOSED",
+                    CryptoPaperPosition.mode == "REAL",
+                )
+            )
+            if filter_sym:
+                query = query.where(CryptoPaperPosition.symbol.ilike(f"%{filter_sym}%"))
+            query = query.order_by(CryptoPaperPosition.closed_at.desc()).limit(1)
+
+            result = await session.execute(query)
+            pos = result.scalar_one_or_none()
+
+        if not pos:
+            target_name = f" koin **{filter_sym}**" if filter_sym else ""
+            await update.message.reply_text(
+                f"ℹ️ Belum ada riwayat transaksi real yang selesai untuk{target_name}.\n"
+                f"Ketik `/riwayat` untuk melihat daftar transaksi yang pernah ada.",
+                parse_mode="Markdown",
+            )
+            return
+
+        meta = pos.trade_metadata if isinstance(pos.trade_metadata, dict) else {}
+        entry_snap = meta.get("entry_snapshot") or {}
+        telemetry = meta.get("telemetry") or {}
+        exit_snap = meta.get("exit_snapshot") or {}
+        post_mortem = exit_snap.get("post_mortem") or {}
+
+        pnl = pos.realized_pnl or 0.0
+        quote = pos.quote or "USDT"
+        cost_basis = pos.invested or (pos.quantity * pos.entry_price if pos.quantity and pos.entry_price else 1.0)
+        pnl_pct = (pnl / cost_basis * 100.0) if cost_basis else 0.0
+        pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+
+        closed_time = pos.closed_at.astimezone().strftime("%d/%m/%Y %H:%M") if pos.closed_at else "-"
+        entry_time = pos.created_at.astimezone().strftime("%d/%m/%Y %H:%M") if pos.created_at else "-"
+        dur_str = exit_snap.get("duration_formatted") or "-"
+
+        lines = [
+            f"🔬 **AUDIT FORENSIC BOT: {pos.display or pos.symbol}**",
+            f"Status: **{pos.exit_reason or 'CLOSED'}** | Waktu Selesai: `{closed_time}`",
+            f"Durasi Trade: `{dur_str}` (Entry: `{entry_time}`)",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            "📥 **1. KEPUTUSAN ENTRY (Snapshot Bot):**",
+            f"• Strategi: `{entry_snap.get('strategy', 'PULLBACK')}`",
+            f"• Skor Algoritma: `{entry_snap.get('score', pos.entry_score or '-')}/100`",
+            f"• Harga Beli: `{_fmt_price(pos.entry_price)} {quote}`",
+            f"• Investasi: `{cost_basis:.2f} {quote}` (Qty: `{pos.quantity or 0.0:.6f}`)",
+        ]
+
+        t1h = entry_snap.get("technicals_1h") or {}
+        if t1h:
+            lines.append(
+                f"• 1h: RSI `{t1h.get('rsi', '-')}` · MACD `{t1h.get('macd_state', '-')}` · "
+                f"RV `{t1h.get('relative_volume', '-')}` · EMA20 Dist `{t1h.get('distance_to_ema20_pct', '-')}%`"
+            )
+        t15 = entry_snap.get("technicals_15m") or {}
+        if t15:
+            lines.append(
+                f"• 15m Konfirmasi: Trend `{t15.get('trend', '-')}` · MACD `{t15.get('macd_state', '-')}`"
+            )
+        btc_info = (entry_snap.get("market_context") or {}).get("btc") or {}
+        if btc_info:
+            lines.append(
+                f"• Kondisi BTC Saat Entry: `{btc_info.get('btc_trend_1h', '-')}` (MACD `{btc_info.get('btc_macd_1h', '-')}`)"
+            )
+        ai_v = entry_snap.get("ai_verdict") or {}
+        if ai_v:
+            lines.append(
+                f"• AI Verdict: `{ai_v.get('verdict', '-')}` (Keyakinan: `{ai_v.get('confidence', '-')}%`)"
+            )
+
+        lines.extend([
+            "",
+            "📈 **2. TELEMETRI SELAMA POSISI BERJALAN:**",
+            f"• Peak Floating Gain: `+{telemetry.get('max_floating_profit_pct', 0.0):.2f}%` (High: `{_fmt_price(telemetry.get('highest_price', pos.entry_price))}`)",
+            f"• Max Drawdown: `{telemetry.get('max_floating_loss_pct', 0.0):.2f}%` (Low: `{_fmt_price(telemetry.get('lowest_price', pos.entry_price))}`)",
+            f"• Auto-BEP Status: `{'Aktif Terkunci 🔒' if telemetry.get('bep_activated') else 'Tidak Aktif'}`",
+            f"• Trailing SL: `{len(telemetry.get('trailing_updates', []))} kali penyesuaian`",
+        ])
+
+        fees = exit_snap.get("fees") or {}
+        tot_fee = fees.get("total_fees", 0.0)
+        lines.extend([
+            "",
+            "🏁 **3. HASIL EKSEKUSI & BIAYA (Tokocrypto):**",
+            f"• Harga Keluar: `{_fmt_price(pos.exit_price)} {quote}`",
+            f"• Gross Price Move: `{exit_snap.get('gross_move_pct', 0.0):+.2f}%`",
+            f"• Total Fee Beli + Jual (0.5%): `-{tot_fee:.4f} {quote}`",
+            f"• {pnl_emoji} **Realized Net PnL:** **{pnl:+.4f} {quote}** ({pnl_pct:+.2f}%)",
+            "",
+            "🧠 **4. DIAGNOSA BOT & BAHAN KOREKSI:**",
+            f"_{post_mortem.get('diagnosis', 'Evaluasi selesai. Disiplin rencana trading.')}_",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            "💡 _Jurnal detail otomatis diarsipkan ke `data/trade_journal.jsonl`._",
+        ])
+
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        logger.exception(f"Error in crypto_audit_handler: {e}")
+        await update.message.reply_text(f"❌ Terjadi kesalahan saat memproses audit: {e}", parse_mode="Markdown")

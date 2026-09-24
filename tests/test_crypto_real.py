@@ -262,6 +262,8 @@ async def test_open_position_places_market_buy(monkeypatch, make_candidate):
         async def execute(self, stmt, *a, **k): return FakeAccountResult()
     session = FakeSession()
 
+    monkeypatch.setattr(get_settings(), "crypto_real_max_sl_pct", 10.0)
+
     cand = make_candidate()
     ok = await t._open_position(session, cand, 180.0, "USDT")
     assert ok is True
@@ -271,6 +273,8 @@ async def test_open_position_places_market_buy(monkeypatch, make_candidate):
     assert positions[0].entry_price == 180.0
     assert positions[0].quantity == 2.5  # 1000*45%/180 = 2.5 SOL, rounded up to step 0.001
     assert positions[0].stop_loss == 170.0
+    assert positions[0].trade_metadata is not None
+    assert "entry_snapshot" in positions[0].trade_metadata
 
 
 @pytest.mark.asyncio
@@ -437,9 +441,8 @@ async def test_close_position_partial_tp1_keeps_position_open(monkeypatch, make_
     assert pos.status == STATUS_OPEN       # still open — rider continues
     assert pos.tp1_partial_done is True
     assert pos.quantity == pytest.approx(0.05)
-    assert pos.realized_pnl is None        # not fully closed yet
-    # pnl on the partial slice: 0.05 * 190 − (0.05/0.1)*18 = 9.5 − 9.0
-    assert account.realized_pnl == pytest.approx(0.5, abs=0.01)
+    assert pos.realized_pnl == pytest.approx(0.4075, abs=0.01)
+    assert account.realized_pnl == pytest.approx(0.4075, abs=0.01)
     assert account.total_trades == 1
 
     # Once TP1 is partially booked, a later TP1 touch must NOT sell again.
@@ -514,7 +517,7 @@ async def test_close_position_full_at_tp1_when_partial_not_feasible(monkeypatch,
     assert sold["quantity"] == 0.05       # full position sold
     assert pos.status == "CLOSED"
     assert pos.exit_reason == "TP1"
-    assert pos.realized_pnl == pytest.approx(0.5, abs=0.01)  # 0.05*190 − 9
+    assert pos.realized_pnl == pytest.approx(0.4075, abs=0.01)
 
 
 @pytest.mark.asyncio
@@ -590,8 +593,8 @@ async def test_close_position_places_market_sell(monkeypatch, make_candidate):
     assert sold["symbol"] == "SOL_USDT"
     assert sold["quantity"] == 0.1
     assert pos.status == "CLOSED"
-    # pnl = (proceeds 17.0 - est_exit_fee 0.017) - cost_basis 18.0 = -1.017
-    assert pos.realized_pnl == pytest.approx(-1.017, abs=0.01)
+    # pnl = (proceeds 17.0 - cost_basis 18.0) - total_fees (0.09 + 0.085) = -1.175
+    assert pos.realized_pnl == pytest.approx(-1.175, abs=0.01)
     assert pos.exit_reason == "SL"
 
 
