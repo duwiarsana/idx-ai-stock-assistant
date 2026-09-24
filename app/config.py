@@ -201,10 +201,10 @@ class Settings(BaseSettings):
     # Minimum POSITION value in quote asset when opening. Must sit comfortably
     # ABOVE the exchange NOTIONAL minimum: sizing right at the exchange minimum
     # means fees + a tiny adverse move push the position below the sellable
-    # threshold ("dust trap" — the position becomes impossible to close).
-    crypto_real_min_position_quote: float = 7.0
-    # Max simultaneously open real positions (focused on top 3 setups for higher position size).
-    crypto_real_max_positions: int = 3
+    # Minimum POSITION value in quote asset when opening.
+    crypto_real_min_position_quote: float = 15.0
+    # Max simultaneously open real positions (1 = Single-Sniper mode for full position size).
+    crypto_real_max_positions: int = 1
     # Min momentum score to open a real position (higher = more selective).
     # Backtest and 327 real trade review showed score >= 78 generates consistent positive PnL (+5.8 USDT),
     # while sub-78 setups account for >80% of net negative trades.

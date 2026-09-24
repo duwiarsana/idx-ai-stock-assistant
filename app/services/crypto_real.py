@@ -842,6 +842,10 @@ class RealTrader:
             logger.warning(f"REAL BUY skipped {symbol}: cannot read {quote} balance")
             return False
         allocated = balance * (settings.crypto_real_allocation_percent / 100.0)
+        # Single-sniper mode (max_positions == 1): when trading with standard retail balances (<= 100 USDT),
+        # allocate ~95% of available balance to the single top setup (5% buffer for fees & step rounding).
+        if settings.crypto_real_max_positions == 1 and balance <= 100.0:
+            allocated = max(allocated, balance * 0.95)
         if allocated <= 0:
             logger.warning(f"REAL BUY skipped {symbol}: {quote} balance too low")
             return False
