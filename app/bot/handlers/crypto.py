@@ -723,15 +723,16 @@ async def crypto_audit_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         dur_str = exit_snap.get("duration_formatted") or "-"
 
         safe_symbol = (pos.display or pos.symbol or "").replace("_", "\\_")
-        safe_diag = post_mortem.get('diagnosis', 'Evaluasi selesai. Disiplin rencana trading.').replace("_", "\\_").replace("*", "\\*")
+        safe_diag = post_mortem.get('diagnosis', 'Evaluasi selesai. Disiplin rencana trading.').replace("_", " ").replace("*", "")
+        safe_exit = str(pos.exit_reason or 'CLOSED').replace("_", "\\_")
 
         lines = [
             f"🔬 **AUDIT FORENSIC BOT: {safe_symbol}**",
-            f"Status: **{pos.exit_reason or 'CLOSED'}** | Waktu Selesai: `{closed_time}`",
+            f"Status: **{safe_exit}** | Waktu Selesai: `{closed_time}`",
             f"Durasi Trade: `{dur_str}` (Entry: `{entry_time}`)",
             "━━━━━━━━━━━━━━━━━━━━━━",
             "📥 **1. KEPUTUSAN ENTRY (Snapshot Bot):**",
-            f"• Strategi: `{str(entry_snap.get('strategy', 'PULLBACK')).replace('_', '\\_')}`",
+            f"• Strategi: `{str(entry_snap.get('strategy', 'PULLBACK'))}`",
             f"• Skor Algoritma: `{entry_snap.get('score', pos.entry_score or '-')}/100`",
             f"• Harga Beli: `{_fmt_price(pos.entry_price)} {quote}`",
             f"• Investasi: `{cost_basis:.2f} {quote}` (Qty: `{pos.quantity or 0.0:.6f}`)",
@@ -740,23 +741,23 @@ async def crypto_audit_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         t1h = entry_snap.get("technicals_1h") or {}
         if t1h:
             lines.append(
-                f"• 1h: RSI `{t1h.get('rsi', '-')}` · MACD `{str(t1h.get('macd_state', '-')).replace('_', '\\_')}` · "
+                f"• 1h: RSI `{t1h.get('rsi', '-')}` · MACD `{str(t1h.get('macd_state', '-'))}` · "
                 f"RV `{t1h.get('relative_volume', '-')}` · EMA20 Dist `{t1h.get('distance_to_ema20_pct', '-')}%`"
             )
         t15 = entry_snap.get("technicals_15m") or {}
         if t15:
             lines.append(
-                f"• 15m Konfirmasi: Trend `{str(t15.get('trend', '-')).replace('_', '\\_')}` · MACD `{str(t15.get('macd_state', '-')).replace('_', '\\_')}`"
+                f"• 15m Konfirmasi: Trend `{str(t15.get('trend', '-'))}` · MACD `{str(t15.get('macd_state', '-'))}`"
             )
         btc_info = (entry_snap.get("market_context") or {}).get("btc") or {}
         if btc_info:
             lines.append(
-                f"• Kondisi BTC Saat Entry: `{str(btc_info.get('btc_trend_1h', '-')).replace('_', '\\_')}` (MACD `{str(btc_info.get('btc_macd_1h', '-')).replace('_', '\\_')}`)"
+                f"• Kondisi BTC Saat Entry: `{str(btc_info.get('btc_trend_1h', '-'))}` (MACD `{str(btc_info.get('btc_macd_1h', '-'))}`)"
             )
         ai_v = entry_snap.get("ai_verdict") or {}
         if ai_v:
             lines.append(
-                f"• AI Verdict: `{str(ai_v.get('verdict', '-')).replace('_', '\\_')}` (Keyakinan: `{ai_v.get('confidence', '-')}%`)"
+                f"• AI Verdict: `{str(ai_v.get('verdict', '-'))}` (Keyakinan: `{ai_v.get('confidence', '-')}%`)"
             )
 
         lines.extend([
@@ -764,7 +765,7 @@ async def crypto_audit_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             "📈 **2. TELEMETRI SELAMA POSISI BERJALAN:**",
             f"• Peak Floating Gain: `+{telemetry.get('max_floating_profit_pct', 0.0):.2f}%` (High: `{_fmt_price(telemetry.get('highest_price', pos.entry_price))}`)",
             f"• Max Drawdown: `{telemetry.get('max_floating_loss_pct', 0.0):.2f}%` (Low: `{_fmt_price(telemetry.get('lowest_price', pos.entry_price))}`)",
-            f"• Auto-BEP Status: `{'Aktif Terkunci 🔒' if telemetry.get('bep_activated') else 'Tidak Aktif'}`",
+            f"• Auto-BEP Status: `{'Aktif Terkunci' if telemetry.get('bep_activated') else 'Tidak Aktif'}`",
             f"• Trailing SL: `{len(telemetry.get('trailing_updates', []))} kali penyesuaian`",
         ])
 
@@ -779,9 +780,9 @@ async def crypto_audit_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             f"• {pnl_emoji} **Realized Net PnL:** **{pnl:+.4f} {quote}** ({pnl_pct:+.2f}%)",
             "",
             "🧠 **4. DIAGNOSA BOT & BAHAN KOREKSI:**",
-            f"_{safe_diag}_",
+            f"💡 {safe_diag}",
             "━━━━━━━━━━━━━━━━━━━━━━",
-            "💡 _Jurnal detail otomatis diarsipkan ke `data/trade_journal.jsonl`._",
+            "📔 Jurnal detail otomatis diarsipkan ke server.",
         ])
 
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
