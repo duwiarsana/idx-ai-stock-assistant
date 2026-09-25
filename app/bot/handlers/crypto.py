@@ -722,13 +722,16 @@ async def crypto_audit_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         entry_time = pos.created_at.astimezone().strftime("%d/%m/%Y %H:%M") if pos.created_at else "-"
         dur_str = exit_snap.get("duration_formatted") or "-"
 
+        safe_symbol = (pos.display or pos.symbol or "").replace("_", "\\_")
+        safe_diag = post_mortem.get('diagnosis', 'Evaluasi selesai. Disiplin rencana trading.').replace("_", "\\_").replace("*", "\\*")
+
         lines = [
-            f"🔬 **AUDIT FORENSIC BOT: {pos.display or pos.symbol}**",
+            f"🔬 **AUDIT FORENSIC BOT: {safe_symbol}**",
             f"Status: **{pos.exit_reason or 'CLOSED'}** | Waktu Selesai: `{closed_time}`",
             f"Durasi Trade: `{dur_str}` (Entry: `{entry_time}`)",
             "━━━━━━━━━━━━━━━━━━━━━━",
             "📥 **1. KEPUTUSAN ENTRY (Snapshot Bot):**",
-            f"• Strategi: `{entry_snap.get('strategy', 'PULLBACK')}`",
+            f"• Strategi: `{str(entry_snap.get('strategy', 'PULLBACK')).replace('_', '\\_')}`",
             f"• Skor Algoritma: `{entry_snap.get('score', pos.entry_score or '-')}/100`",
             f"• Harga Beli: `{_fmt_price(pos.entry_price)} {quote}`",
             f"• Investasi: `{cost_basis:.2f} {quote}` (Qty: `{pos.quantity or 0.0:.6f}`)",
@@ -737,23 +740,23 @@ async def crypto_audit_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         t1h = entry_snap.get("technicals_1h") or {}
         if t1h:
             lines.append(
-                f"• 1h: RSI `{t1h.get('rsi', '-')}` · MACD `{t1h.get('macd_state', '-')}` · "
+                f"• 1h: RSI `{t1h.get('rsi', '-')}` · MACD `{str(t1h.get('macd_state', '-')).replace('_', '\\_')}` · "
                 f"RV `{t1h.get('relative_volume', '-')}` · EMA20 Dist `{t1h.get('distance_to_ema20_pct', '-')}%`"
             )
         t15 = entry_snap.get("technicals_15m") or {}
         if t15:
             lines.append(
-                f"• 15m Konfirmasi: Trend `{t15.get('trend', '-')}` · MACD `{t15.get('macd_state', '-')}`"
+                f"• 15m Konfirmasi: Trend `{str(t15.get('trend', '-')).replace('_', '\\_')}` · MACD `{str(t15.get('macd_state', '-')).replace('_', '\\_')}`"
             )
         btc_info = (entry_snap.get("market_context") or {}).get("btc") or {}
         if btc_info:
             lines.append(
-                f"• Kondisi BTC Saat Entry: `{btc_info.get('btc_trend_1h', '-')}` (MACD `{btc_info.get('btc_macd_1h', '-')}`)"
+                f"• Kondisi BTC Saat Entry: `{str(btc_info.get('btc_trend_1h', '-')).replace('_', '\\_')}` (MACD `{str(btc_info.get('btc_macd_1h', '-')).replace('_', '\\_')}`)"
             )
         ai_v = entry_snap.get("ai_verdict") or {}
         if ai_v:
             lines.append(
-                f"• AI Verdict: `{ai_v.get('verdict', '-')}` (Keyakinan: `{ai_v.get('confidence', '-')}%`)"
+                f"• AI Verdict: `{str(ai_v.get('verdict', '-')).replace('_', '\\_')}` (Keyakinan: `{ai_v.get('confidence', '-')}%`)"
             )
 
         lines.extend([
@@ -776,7 +779,7 @@ async def crypto_audit_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             f"• {pnl_emoji} **Realized Net PnL:** **{pnl:+.4f} {quote}** ({pnl_pct:+.2f}%)",
             "",
             "🧠 **4. DIAGNOSA BOT & BAHAN KOREKSI:**",
-            f"_{post_mortem.get('diagnosis', 'Evaluasi selesai. Disiplin rencana trading.')}_",
+            f"_{safe_diag}_",
             "━━━━━━━━━━━━━━━━━━━━━━",
             "💡 _Jurnal detail otomatis diarsipkan ke `data/trade_journal.jsonl`._",
         ])
